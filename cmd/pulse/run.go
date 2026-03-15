@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Pratham-Mishra04/pulse/engine"
+	"github.com/Pratham-Mishra04/pulse/internal/log"
 )
 
 var runCmd = &cobra.Command{
@@ -35,6 +37,8 @@ func runPulse(cmd *cobra.Command, args []string) error {
 	if len(cfg.Services) == 0 {
 		return fmt.Errorf("no services defined in %s", flagConfig)
 	}
+
+	printBanner(l, cfg, flagConfig)
 
 	// Two-stage Ctrl+C:
 	//   First signal  → cancel context → graceful shutdown (SIGTERM to child)
@@ -100,4 +104,19 @@ func runPulse(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return firstErr
+}
+
+// printBanner prints the startup widget showing version, config path, and
+// per-service watch configuration.
+func printBanner(l *log.Logger, cfg engine.Config, configPath string) {
+	infos := make([]log.ServiceInfo, 0, len(cfg.Services))
+	for name, svc := range cfg.Services {
+		infos = append(infos, log.ServiceInfo{
+			Name:     name,
+			Path:     svc.Path,
+			Watch:    svc.Watch,
+			Debounce: svc.Debounce.String(),
+		})
+	}
+	l.Banner(Version, runtime.Version(), configPath, infos)
 }

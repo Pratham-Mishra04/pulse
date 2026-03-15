@@ -100,7 +100,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		e.log.Error(fmt.Sprintf("initial build failed:\n%s", result.Output))
 		return result.Err
 	}
-	if err := e.runner.Start(ctx, result); err != nil {
+	if err := e.runner.Start(result); err != nil {
 		return err
 	}
 	// Run the post hook after the initial successful start.
@@ -147,14 +147,13 @@ func (e *Engine) Run(ctx context.Context) error {
 			e.log.Build(e.name, result.Elapsed, result.Err == nil)
 			if result.Err != nil {
 				// Build failed (or pre hook aborted it) — log the compiler
-				// output and keep the old process running. This is Pulse's
-				// core differentiator vs Air.
+				// output and keep the old process running.
 				e.log.Error(result.Output)
 				e.log.Keeping(e.runner.Pid())
 				continue
 			}
 			// Build succeeded — stop the old process, start the new binary.
-			if err := e.runner.Restart(ctx, result); err != nil {
+			if err := e.runner.Restart(result); err != nil {
 				e.log.Error(err.Error())
 				continue
 			}
