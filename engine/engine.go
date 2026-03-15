@@ -38,6 +38,33 @@ func New(name string, cfg ServiceConfig, l *log.Logger) (*Engine, error) {
 	}, nil
 }
 
+// runPostHook executes the configured post hook and handles logging.
+// When isInitial is true (first startup) and PostStrict is set, a failure
+// returns an error so Run() can exit. On subsequent restarts (isInitial=false)
+// the running process is never killed due to a post hook failure — any error
+// is only logged.
+func (e *Engine) runPostHook(ctx context.Context, isInitial bool) error {
+	if e.cfg.Post == "" {
+		return nil
+	}
+	out, elapsed, err := runHook(ctx, e.cfg.Post, e.cfg.Path)
+	e.log.Hook("post", e.name, elapsed, err == nil)
+	if err != nil {
+		if out != "" {
+			e.log.Error(out)
+		}
+		if e.cfg.PostStrict {
+			if isInitial {
+				return fmt.Errorf("post hook failed: %w", err)
+			}
+			e.log.Error(fmt.Sprintf("post hook failed: %v", err))
+		}
+		// Either way, the process is already running — we never kill it due
+		// to a post hook failure (F-09 spec).
+	}
+	return nil
+}
+
 // Run starts the watch → build → run loop and blocks until ctx is cancelled.
 //
 // Startup sequence:
@@ -46,14 +73,19 @@ func New(name string, cfg ServiceConfig, l *log.Logger) (*Engine, error) {
 //  3. Start the file watcher and builder worker goroutines.
 //  4. Enter the event loop.
 func (e *Engine) Run(ctx context.Context) error {
-	// Step 1 & 2: initial build and start. If the initial build fails, Pulse
-	// exits — there is no previous process to keep alive on first run.
+	// Step 1 & 2: initial build and start. If the initial build fails (or the
+	// pre hook aborts it with pre_strict), Pulse exits — there is no previous
+	// process to keep alive on first run.
 	result := e.builder.Build(ctx)
 	if result.Err != nil {
 		e.log.Error(fmt.Sprintf("initial build failed:\n%s", result.Output))
 		return result.Err
 	}
 	if err := e.runner.Start(ctx, result); err != nil {
+		return err
+	}
+	// Run the post hook after the initial successful start.
+	if err := e.runPostHook(ctx, true); err != nil {
 		return err
 	}
 
@@ -95,14 +127,20 @@ func (e *Engine) Run(ctx context.Context) error {
 			}
 			e.log.Build(e.name, result.Elapsed, result.Err == nil)
 			if result.Err != nil {
-				// Build failed — log the compiler output and keep the old
-				// process running. This is Pulse's core differentiator vs Air.
+				// Build failed (or pre hook aborted it) — log the compiler
+				// output and keep the old process running. This is Pulse's
+				// core differentiator vs Air.
 				e.log.Error(result.Output)
 				e.log.Keeping(e.runner.Pid())
 				continue
 			}
 			// Build succeeded — stop the old process, start the new binary.
 			if err := e.runner.Restart(ctx, result); err != nil {
+				e.log.Error(err.Error())
+				continue
+			}
+			// Run the post hook after a successful restart.
+			if err := e.runPostHook(ctx, false); err != nil {
 				e.log.Error(err.Error())
 			}
 		}
