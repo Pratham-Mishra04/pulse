@@ -28,6 +28,7 @@ var (
 	stylePid      = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
 	styleFilePath = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	styleMs       = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	stylePrefix   = lipgloss.NewStyle().Foreground(lipgloss.Color("111")).Bold(true)
 )
 
 // LogLevel controls how much output the logger emits.
@@ -42,6 +43,7 @@ const (
 type Logger struct {
 	level   LogLevel
 	noColor bool
+	prefix  string // service name shown before every line in multi-service mode
 }
 
 func New(level LogLevel, noColor bool) *Logger {
@@ -53,6 +55,24 @@ func New(level LogLevel, noColor bool) *Logger {
 		lipgloss.SetColorProfile(0)
 	}
 	return l
+}
+
+// WithPrefix returns a copy of the logger that prepends the service name to
+// every log line. Used in multi-service mode so each service's output is
+// distinguishable at a glance.
+func (l *Logger) WithPrefix(name string) *Logger {
+	dup := *l
+	dup.prefix = name
+	return &dup
+}
+
+// pfx returns the rendered service name prefix, or an empty string when running
+// in single-service mode (prefix not set).
+func (l *Logger) pfx() string {
+	if l.prefix == "" {
+		return ""
+	}
+	return stylePrefix.Render(l.prefix) + " "
 }
 
 func isTTY() bool {
@@ -69,7 +89,7 @@ func (l *Logger) ts() string {
 
 // Info prints a [pulse] prefixed general message.
 func (l *Logger) Info(msg string) {
-	fmt.Printf("%s%s %s\n", l.ts(), styleInfo.Render("[pulse]"), msg)
+	fmt.Printf("%s%s%s %s\n", l.ts(), l.pfx(), styleInfo.Render("[pulse]"), msg)
 }
 
 // Watch prints a [watch] line for a changed file. Suppressed in quiet mode.
@@ -77,8 +97,9 @@ func (l *Logger) Watch(file string) {
 	if l.level == LogLevelQuiet {
 		return
 	}
-	fmt.Printf("%s%s %s\n",
+	fmt.Printf("%s%s%s %s\n",
 		l.ts(),
+		l.pfx(),
 		styleWatch.Render("[watch]"),
 		styleFilePath.Render(file),
 	)
@@ -93,8 +114,9 @@ func (l *Logger) Build(name string, elapsed time.Duration, ok bool) {
 	if !ok {
 		mark = styleFail.Render("✗")
 	}
-	fmt.Printf("%s%s %s %s %s\n",
+	fmt.Printf("%s%s%s %s %s %s\n",
 		l.ts(),
+		l.pfx(),
 		styleBuild.Render("[build]"),
 		name,
 		styleMs.Render(fmt.Sprintf("· %dms", elapsed.Milliseconds())),
@@ -104,8 +126,9 @@ func (l *Logger) Build(name string, elapsed time.Duration, ok bool) {
 
 // Restart prints a [restart] line with the new pid.
 func (l *Logger) Restart(name string, pid int) {
-	fmt.Printf("%s%s %s %s %s\n",
+	fmt.Printf("%s%s%s %s %s %s\n",
 		l.ts(),
+		l.pfx(),
 		styleRestart.Render("[restart]"),
 		name,
 		styleDim.Render("→"),
@@ -115,8 +138,9 @@ func (l *Logger) Restart(name string, pid int) {
 
 // Keeping prints a [run] keeping line when a build fails and the old process stays alive.
 func (l *Logger) Keeping(pid int) {
-	fmt.Printf("%s%s keeping previous process %s\n",
+	fmt.Printf("%s%s%s keeping previous process %s\n",
 		l.ts(),
+		l.pfx(),
 		styleRun.Render("[run]"),
 		stylePid.Render(fmt.Sprintf("(pid %d)", pid)),
 	)
@@ -124,10 +148,31 @@ func (l *Logger) Keeping(pid int) {
 
 // Error prints a [error] prefixed message.
 func (l *Logger) Error(msg string) {
-	fmt.Printf("%s%s %s\n",
+	fmt.Printf("%s%s%s %s\n",
 		l.ts(),
+		l.pfx(),
 		styleError.Render("[error]"),
 		msg,
+	)
+}
+
+// Hook prints a [pre] or [post] hook result line. Suppressed in quiet mode on success.
+func (l *Logger) Hook(kind, name string, elapsed time.Duration, ok bool) {
+	if l.level == LogLevelQuiet && ok {
+		return
+	}
+	mark := styleSuccess.Render("✓")
+	if !ok {
+		mark = styleFail.Render("✗")
+	}
+	label := fmt.Sprintf("[%s]", kind)
+	fmt.Printf("%s%s%s %s %s %s\n",
+		l.ts(),
+		l.pfx(),
+		styleSkip.Render(label),
+		name,
+		styleMs.Render(fmt.Sprintf("· %dms", elapsed.Milliseconds())),
+		mark,
 	)
 }
 
@@ -136,8 +181,9 @@ func (l *Logger) Skip(name, reason string) {
 	if l.level == LogLevelQuiet {
 		return
 	}
-	fmt.Printf("%s%s %s %s\n",
+	fmt.Printf("%s%s%s %s %s\n",
 		l.ts(),
+		l.pfx(),
 		styleSkip.Render("[skip]"),
 		name,
 		styleDim.Render("("+reason+")"),
@@ -149,8 +195,9 @@ func (l *Logger) Verbose(msg string) {
 	if l.level != LogLevelVerbose {
 		return
 	}
-	fmt.Printf("%s%s %s\n",
+	fmt.Printf("%s%s%s %s\n",
 		l.ts(),
+		l.pfx(),
 		styleVerbose.Render("[verbose]"),
 		styleVerbose.Render(msg),
 	)

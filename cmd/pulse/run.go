@@ -77,9 +77,11 @@ func runPulse(cmd *cobra.Command, args []string) error {
 	}
 
 	// Multi-service: run each engine in its own goroutine and wait for all.
+	// Each engine gets a logger prefixed with its service name so interleaved
+	// output is immediately attributable: "api [build] 230ms ✓"
 	errs := make(chan error, len(cfg.Services))
 	for name, svc := range cfg.Services {
-		e, err := engine.New(name, svc, l)
+		e, err := engine.New(name, svc, l.WithPrefix(name))
 		if err != nil {
 			return err
 		}
