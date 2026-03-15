@@ -143,8 +143,34 @@ func (b *Builder) Run(ctx context.Context) {
 // Build executes the build command synchronously and returns the result.
 // Exported so Engine can call it directly for the initial build at startup,
 // before the worker goroutine and file watcher are running.
+//
+// If a Pre hook is configured, it runs before the build command. When
+// PreStrict is true, a hook failure aborts the build and returns an error
+// result — the caller (Engine) treats this identically to a compile error and
+// keeps the old process alive.
 func (b *Builder) Build(ctx context.Context) BuildResult {
 	start := time.Now()
+
+	// Run the pre hook if configured.
+	if b.cfg.Pre != "" {
+		out, elapsed, err := runHook(ctx, b.cfg.Pre, b.cfg.Path)
+		b.log.Hook("pre", b.name, elapsed, err == nil)
+		if err != nil {
+			if out != "" {
+				b.log.Error(out)
+			}
+			if b.cfg.PreStrict {
+				// Abort the build — caller keeps the old process alive.
+				return BuildResult{
+					BinPath: b.cfg.Run,
+					Output:  fmt.Sprintf("pre hook failed: %v", err),
+					Elapsed: time.Since(start),
+					Err:     fmt.Errorf("pre hook failed: %w", err),
+				}
+			}
+			// Non-strict: log the failure but continue with the build.
+		}
+	}
 
 	// Split the build string into command + args using a shell lexer so that
 	// quoted arguments (e.g. -ldflags "-X main.Version=1.2.3 -X main.Build=abc")
