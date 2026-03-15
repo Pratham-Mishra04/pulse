@@ -34,10 +34,10 @@ type airConfig struct {
 	EnvFiles    []string    `toml:"env_files"`
 	Build       airBuild    `toml:"build"`
 	Log         airLog      `toml:"log"`
-	Color       interface{} `toml:"color"`   // always dropped
+	Color       interface{} `toml:"color"` // always dropped
 	Misc        airMisc     `toml:"misc"`
-	Screen      interface{} `toml:"screen"`  // always dropped
-	Proxy       interface{} `toml:"proxy"`   // always dropped
+	Screen      interface{} `toml:"screen"` // always dropped
+	Proxy       interface{} `toml:"proxy"`  // always dropped
 }
 
 // airEntrypoint unmarshals Air's build.entrypoint which can be either a
