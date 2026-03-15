@@ -8,14 +8,20 @@ import (
 	"github.com/Pratham-Mishra04/pulse/internal/log"
 )
 
-// Version is overridden at build time via -ldflags, and falls back to the
-// module version embedded by the Go toolchain (set when using go install).
-var Version = func() string {
-	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
-		return info.Main.Version
+// Version is set at build time via -ldflags. If not set, it falls back to the
+// module version embedded by the Go toolchain (populated by go install).
+var Version = "dev"
+
+func init() {
+	if Version == "dev" {
+		if info, ok := debug.ReadBuildInfo(); ok {
+			v := info.Main.Version
+			if v != "" && v != "(devel)" {
+				Version = v
+			}
+		}
 	}
-	return "dev"
-}()
+}
 
 // Global flags shared across commands.
 var (

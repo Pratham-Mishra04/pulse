@@ -63,12 +63,17 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// as shell tokens; Windows backslashes would be misread as escape sequences).
 	// e.g. name="api" → ./tmp/api
 	binPath := filepath.ToSlash(filepath.Join(".", "tmp", name))
+	// Ensure the entrypoint starts with "./" so go build treats it as a local
+	// package path rather than resolving it against the stdlib or module cache.
+	if entrypoint != "." && !strings.HasPrefix(entrypoint, "./") {
+		entrypoint = "./" + entrypoint
+	}
 	entrypointSlash := filepath.ToSlash(entrypoint)
 
 	// Build the ServiceConfig with explicit values — no hidden defaults in
 	// the generated file so users can see exactly what Pulse will do.
 	svc := engine.ServiceConfig{
-		Path:        entrypointSlash,
+		Path:        ".",
 		Build:       fmt.Sprintf("go build -o %s %s", binPath, entrypointSlash),
 		Run:         binPath,
 		Watch:       []string{".go", "go.mod", "go.sum"},

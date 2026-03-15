@@ -125,6 +125,18 @@ func (l *Logger) Build(name string, elapsed time.Duration, ok bool) {
 	)
 }
 
+// Start prints a [start] line with the pid on first launch.
+func (l *Logger) Start(name string, pid int) {
+	fmt.Printf("%s%s%s %s %s %s\n",
+		l.ts(),
+		l.pfx(),
+		styleRestart.Render("[start]"),
+		name,
+		styleDim.Render("→"),
+		stylePid.Render(fmt.Sprintf("pid %d", pid)),
+	)
+}
+
 // Restart prints a [restart] line with the new pid.
 func (l *Logger) Restart(name string, pid int) {
 	fmt.Printf("%s%s%s %s %s %s\n",
@@ -233,7 +245,7 @@ func (l *Logger) Banner(version, goVersion, configPath string, services []Servic
 	fmt.Println(styleArt.Render(art4))
 	fmt.Printf("%s  %s\n\n",
 		styleArt.Render(art5),
-		styleTag.Render("v"+version+" · "+goVersion),
+		styleTag.Render("v"+strings.TrimPrefix(version, "v")+" · "+goVersion),
 	)
 
 	for _, svc := range services {
