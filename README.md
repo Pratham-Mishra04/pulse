@@ -32,10 +32,10 @@ Pulse takes the opposite approach: if the new build fails, the old binary keeps 
 
 **Other differences from Air:**
 
-- Zero-config container support — polling is auto-detected inside Docker/Kubernetes
+- Auto container detection — polling is auto-detected inside Docker/Kubernetes
 - Native Go workspace (`go.work`) support — external shared modules trigger rebuilds automatically
-- Strict unknown-key YAML parsing — misspelled config keys are a hard error, not a silent ignore
-- `pulse migrate` — one-command migration from `.air.toml`
+
+If you are migrating from Air, you can simply use `pulse migrate` to migrate your config to Pulse.
 
 ---
 
@@ -156,24 +156,24 @@ services:
 
 ### Field Reference
 
-| Field           | Default                 | Description                                           |
-| --------------- | ----------------------- | ----------------------------------------------------- |
+| Field           | Default                 | Description                                                                       |
+| --------------- | ----------------------- | --------------------------------------------------------------------------------- |
 | `build`         | `""`                    | Shell command to compile the service (optional — omit for plain-process services) |
-| `run`           | required                | Command to start the process                          |
-| `path`          | `.`                     | Working directory for the build command               |
-| `watch`         | `[.go, go.mod, go.sum]` | Extensions or filenames that trigger a rebuild        |
-| `ignore`        | `[]`                    | Glob patterns excluded from watching (base filename)  |
-| `env`           | `{}`                    | Extra environment variables injected into the process |
-| `pre`           | `""`                    | Command run before each build                         |
-| `pre_strict`    | `false`                 | Abort build if `pre` fails                            |
-| `post`          | `""`                    | Command run after each successful restart             |
-| `post_strict`   | `false`                 | Log hard error if `post` fails                        |
-| `debounce`      | `300ms`                 | Quiet period after last file event before building    |
-| `kill_timeout`  | `5s`                    | Grace period between SIGTERM and SIGKILL              |
-| `polling`       | `"auto"`                | Polling strategy — see [Containers](#containers)      |
-| `poll_interval` | `500ms`                 | Tick rate when polling is active                      |
-| `no_stdin`      | `false`                 | Disable stdin forwarding to child process             |
-| `no_workspace`  | `false`                 | Disable automatic go.work detection                   |
+| `run`           | required                | Command to start the process                                                      |
+| `path`          | `.`                     | Working directory for the build command                                           |
+| `watch`         | `[.go, go.mod, go.sum]` | Extensions or filenames that trigger a rebuild                                    |
+| `ignore`        | `[]`                    | Glob patterns excluded from watching (base filename)                              |
+| `env`           | `{}`                    | Extra environment variables injected into the process                             |
+| `pre`           | `""`                    | Command run before each build                                                     |
+| `pre_strict`    | `false`                 | Abort build if `pre` fails                                                        |
+| `post`          | `""`                    | Command run after each successful restart                                         |
+| `post_strict`   | `false`                 | Log hard error if `post` fails                                                    |
+| `debounce`      | `300ms`                 | Quiet period after last file event before building                                |
+| `kill_timeout`  | `5s`                    | Grace period between SIGTERM and SIGKILL                                          |
+| `polling`       | `"auto"`                | Polling strategy — see [Containers](#containers)                                  |
+| `poll_interval` | `500ms`                 | Tick rate when polling is active                                                  |
+| `no_stdin`      | `false`                 | Disable stdin forwarding to child process                                         |
+| `no_workspace`  | `false`                 | Disable automatic go.work detection                                               |
 
 ### Always-Ignored
 
@@ -509,13 +509,13 @@ make snapshot  # cross-compile for Linux, macOS (arm64/amd64)
 
 ## Platform Support
 
-| Platform             | Status                             |
-| -------------------- | ---------------------------------- |
-| macOS (arm64, amd64) | Supported                          |
-| Linux (amd64, arm64) | Supported                          |
-| Windows (amd64)      | Coming soon                        |
-| Inside Docker        | Supported (auto-polling)           |
-| Kubernetes pods      | Supported (auto-polling)           |
+| Platform             | Status                   |
+| -------------------- | ------------------------ |
+| macOS (arm64, amd64) | Supported                |
+| Linux (amd64, arm64) | Supported                |
+| Windows (amd64)      | Coming soon              |
+| Inside Docker        | Supported (auto-polling) |
+| Kubernetes pods      | Supported (auto-polling) |
 
 ---
 

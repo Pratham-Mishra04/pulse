@@ -55,7 +55,7 @@ func NewRunner(name string, cfg ServiceConfig, l *log.Logger) *Runner {
 
 // Start launches the process for the first time.
 func (r *Runner) Start(result BuildResult) error {
-	return r.launch(result)
+	return r.launch(result, true)
 }
 
 // Restart gracefully stops the current process then starts the new binary.
@@ -65,7 +65,7 @@ func (r *Runner) Restart(result BuildResult) error {
 	if err := r.Stop(); err != nil {
 		return err
 	}
-	return r.launch(result)
+	return r.launch(result, false)
 }
 
 // Stop sends SIGTERM to the process group and waits up to KillTimeout for
@@ -135,7 +135,7 @@ func (r *Runner) Pid() int {
 // which is called explicitly by the engine on ctx.Done() — this preserves the
 // graceful SIGTERM → KillTimeout → SIGKILL path and lets the child flush its
 // closing logs on both Ctrl-C and restart.
-func (r *Runner) launch(result BuildResult) error {
+func (r *Runner) launch(result BuildResult, isInitial bool) error {
 	parts, err := shlex.Split(result.BinPath)
 	if err != nil {
 		return fmt.Errorf("failed to parse run command: %w", err)
@@ -177,7 +177,11 @@ func (r *Runner) launch(result BuildResult) error {
 	r.pid = cmd.Process.Pid
 	r.mu.Unlock()
 
-	r.log.Restart(r.name, cmd.Process.Pid)
+	if isInitial {
+		r.log.Start(r.name, cmd.Process.Pid)
+	} else {
+		r.log.Restart(r.name, cmd.Process.Pid)
+	}
 	return nil
 }
 
