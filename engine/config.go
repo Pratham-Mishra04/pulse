@@ -65,6 +65,20 @@ type ServiceConfig struct {
 	// NoStdin disables forwarding of the parent stdin to the child process.
 	// Useful in non-interactive environments like CI.
 	NoStdin bool `yaml:"no_stdin"`
+
+	// Polling controls the file-watching strategy:
+	//   "auto" (default) — use fsnotify normally; switch to polling automatically
+	//                      when a Docker/container environment is detected.
+	//   "on"             — always use polling (useful when auto-detection fails).
+	//   "off"            — always use fsnotify, never poll (trust inotify even
+	//                      inside a container).
+	// Empty string is treated as "auto".
+	Polling string `yaml:"polling"`
+
+	// PollInterval is the tick rate used when polling is active.
+	// Defaults to 500ms. Only meaningful when Polling is "on" or "auto" and a
+	// container is detected.
+	PollInterval time.Duration `yaml:"poll_interval"`
 }
 
 // Config is the top-level structure of pulse.yaml.
@@ -97,6 +111,12 @@ func (s *ServiceConfig) applyDefaults() {
 	if len(s.Watch) == 0 {
 		s.Watch = []string{".go", "go.mod", "go.sum"}
 	}
+	if s.Polling == "" {
+		s.Polling = "auto"
+	}
+	if s.PollInterval == 0 {
+		s.PollInterval = defaultPollInterval
+	}
 }
 
 // LoadConfig reads and parses pulse.yaml from path.
@@ -118,6 +138,14 @@ func LoadConfig(path string) (Config, error) {
 
 	// Apply defaults to every service after parsing.
 	for name, svc := range cfg.Services {
+		switch svc.Polling {
+		case "", "auto", "on", "off":
+		default:
+			return Config{}, fmt.Errorf("service %q: invalid polling mode %q (expected auto|on|off)", name, svc.Polling)
+		}
+		if svc.PollInterval < 0 {
+			return Config{}, fmt.Errorf("service %q: poll_interval must be >= 0", name)
+		}
 		svc.applyDefaults()
 		if svc.Build == "" {
 			return Config{}, fmt.Errorf("service %q: build command is required", name)
