@@ -1,8 +1,8 @@
 BINARY    := pulse
 BUILD_DIR := ./tmp
-CMD       := ./cmd/pulse
+CMD       := .
 VERSION   := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS   := -ldflags "-X main.Version=$(VERSION)"
+LDFLAGS   := -ldflags "-X github.com/Pratham-Mishra04/pulse/internal/cli.Version=$(VERSION)"
 
 .PHONY: all build install run test e2e test-all lint tidy clean snapshot
 
