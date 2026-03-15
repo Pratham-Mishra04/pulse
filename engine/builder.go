@@ -48,6 +48,10 @@ type BuildResult struct {
 
 	// Err is non-nil if the build command exited non-zero.
 	Err error
+
+	// NoBuild is true when the service has no build command configured.
+	// The result is always a success — the engine skips straight to restart.
+	NoBuild bool
 }
 
 func NewBuilder(name string, cfg ServiceConfig, l *log.Logger) *Builder {
@@ -147,6 +151,10 @@ func (b *Builder) Run(ctx context.Context) {
 // PreStrict is true, a hook failure aborts the build and returns an error
 // result — the caller (Engine) treats this identically to a compile error and
 // keeps the old process alive.
+//
+// When no build command is configured (plain-process service), the compile
+// step is skipped entirely and a successful NoBuild result is returned so the
+// engine proceeds straight to starting/restarting the process.
 func (b *Builder) Build(ctx context.Context) BuildResult {
 	start := time.Now()
 
@@ -171,6 +179,16 @@ func (b *Builder) Build(ctx context.Context) BuildResult {
 		}
 	}
 
+	// No build command — plain-process service (e.g. npx, python, node).
+	// Skip compilation entirely and let the engine restart the process directly.
+	if b.cfg.Build == "" {
+		return BuildResult{
+			BinPath: b.cfg.Run,
+			Elapsed: time.Since(start),
+			NoBuild: true,
+		}
+	}
+
 	// Split the build string into command + args using a shell lexer so that
 	// quoted arguments (e.g. -ldflags "-X main.Version=1.2.3 -X main.Build=abc")
 	// are preserved as single tokens rather than split on whitespace.
@@ -181,14 +199,6 @@ func (b *Builder) Build(ctx context.Context) BuildResult {
 			Output:  fmt.Sprintf("invalid build command %q: %v", b.cfg.Build, err),
 			Elapsed: time.Since(start),
 			Err:     fmt.Errorf("invalid build command: %w", err),
-		}
-	}
-	if len(parts) == 0 {
-		return BuildResult{
-			BinPath: b.cfg.Run,
-			Output:  "build command is empty",
-			Elapsed: time.Since(start),
-			Err:     fmt.Errorf("build command is empty"),
 		}
 	}
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
