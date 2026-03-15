@@ -1,13 +1,21 @@
 package cli
 
 import (
+	"runtime/debug"
+
 	"github.com/spf13/cobra"
 
 	"github.com/Pratham-Mishra04/pulse/internal/log"
 )
 
-// Version is set at build time via -ldflags.
-var Version = "dev"
+// Version is overridden at build time via -ldflags, and falls back to the
+// module version embedded by the Go toolchain (set when using go install).
+var Version = func() string {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
+}()
 
 // Global flags shared across commands.
 var (
