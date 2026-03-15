@@ -1,0 +1,16 @@
+# examples/simple.yaml
+#
+# The minimal configuration for a single Go service.
+# This is what `pulse init ./cmd/api` generates for you.
+#
+# Usage:
+#   cp examples/simple.yaml pulse.yaml
+#   pulse
+
+version: 1
+
+services:
+  api:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api

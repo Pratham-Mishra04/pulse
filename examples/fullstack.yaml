@@ -1,0 +1,44 @@
+# examples/fullstack.yaml
+#
+# Go backend + frontend asset pipeline running together.
+#
+# The css and js services have no `build` command — they are plain processes
+# that Pulse watches and restarts when their source files change.
+# Pulse's keep-alive behaviour applies to all services equally: if the CSS
+# watcher crashes, the Go API keeps running.
+
+version: 1
+
+services:
+  api:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    watch:
+      - .go
+      - .templ
+      - go.mod
+      - go.sum
+    pre: templ generate        # regenerate templates before each build
+    env:
+      PORT: 8080
+      DB_URL: postgres://localhost/myapp_dev
+
+  # Tailwind CSS in watch mode — no Go build, just restart the process on
+  # source changes. Pulse treats any service without a `build` key as a
+  # plain process.
+  css:
+    run: npx tailwindcss -i ./assets/app.css -o ./static/app.css --watch
+    watch:
+      - .css
+      - .html
+      - .templ
+    no_stdin: true             # npx doesn't need interactive input
+
+  # TypeScript/JS bundler in watch mode.
+  js:
+    run: npx esbuild src/main.ts --bundle --outfile=static/app.js --watch
+    watch:
+      - .ts
+      - .tsx
+    no_stdin: true

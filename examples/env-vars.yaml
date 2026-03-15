@@ -1,0 +1,21 @@
+# examples/env-vars.yaml
+#
+# Inject environment variables into the running process.
+# env values are merged on top of the parent shell's environment,
+# so PATH, HOME, etc. are always inherited.
+#
+# Common use case: different DB URLs or ports per environment
+# without touching .env files or shell profiles.
+
+version: 1
+
+services:
+  api:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    env:
+      PORT: 8080
+      DB_URL: postgres://localhost/myapp_dev
+      LOG_LEVEL: debug
+      REDIS_ADDR: localhost:6379
