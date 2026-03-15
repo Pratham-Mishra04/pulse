@@ -144,7 +144,11 @@ func (e *Engine) Run(ctx context.Context) error {
 				// Builder goroutine exited unexpectedly — shut down cleanly.
 				return e.runner.Stop()
 			}
-			e.log.Build(e.name, result.Elapsed, result.Err == nil)
+			// Only log a build line when a compile step actually ran.
+			// Plain-process services (no build command) skip straight to restart.
+			if !result.NoBuild {
+				e.log.Build(e.name, result.Elapsed, result.Err == nil)
+			}
 			if result.Err != nil {
 				// Build failed (or pre hook aborted it) — log the compiler
 				// output and keep the old process running.
