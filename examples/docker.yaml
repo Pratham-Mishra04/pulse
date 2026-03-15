@@ -1,0 +1,44 @@
+# examples/docker.yaml
+#
+# Running Pulse inside a Docker container with bind-mounted source code.
+#
+# Problem: inotify (used by fsnotify) does not fire events for bind-mount
+# changes from the host. If you edit a file on your Mac/Linux host, the
+# container never sees the inotify event and Pulse never rebuilds.
+#
+# Solution: use polling mode. Pulse stat-checks files every 500ms and detects
+# changes via mtime comparison instead of kernel events.
+#
+# Polling mode options:
+#   auto (default) — Pulse auto-detects Docker via /.dockerenv and /proc/1/cgroup.
+#                    No config needed in most cases.
+#   on             — force polling regardless of environment (use this if
+#                    auto-detection fails for your container runtime).
+#   off            — always use inotify (not recommended in containers).
+#
+# Example docker-compose.yml:
+#
+#   services:
+#     api:
+#       build: .
+#       volumes:
+#         - .:/app          # bind-mount source — requires polling
+#       working_dir: /app
+#       command: pulse
+
+version: 1
+
+services:
+  api:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+
+    # "auto" works for Docker and Kubernetes out of the box.
+    # Switch to "on" if your container runtime is not detected automatically.
+    polling: auto
+    poll_interval: 500ms   # check for changes every 500ms (default)
+
+    no_stdin: true          # containers are typically non-interactive
+    env:
+      PORT: "8080"

@@ -6,12 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	ignore "github.com/sabhiram/go-gitignore"
 
 	"github.com/Pratham-Mishra04/pulse/internal/log"
 )
+
+const defaultPollInterval = 500 * time.Millisecond
 
 // hardIgnored are directories always excluded from watching, regardless of
 // user config. These are never meaningful sources of Go code changes.
@@ -26,9 +29,10 @@ var hardIgnored = []string{
 // Watcher wraps fsnotify and applies extension filters, hardIgnored patterns,
 // and .gitignore rules. It emits the paths of changed files on the events channel.
 type Watcher struct {
-	cfg    ServiceConfig
-	log    *log.Logger
-	gitign *ignore.GitIgnore // nil if no .gitignore found
+	cfg          ServiceConfig
+	log          *log.Logger
+	gitign       *ignore.GitIgnore // nil if no .gitignore found
+	pollInterval time.Duration     // 0 = use fsnotify, >0 = use polling loop
 }
 
 func NewWatcher(cfg ServiceConfig, l *log.Logger) (*Watcher, error) {
@@ -43,12 +47,41 @@ func NewWatcher(cfg ServiceConfig, l *log.Logger) (*Watcher, error) {
 		}
 		gi = parsed
 	}
-	return &Watcher{cfg: cfg, log: l, gitign: gi}, nil
+
+	// Resolve poll interval from the Polling field.
+	var pollInterval time.Duration
+	switch cfg.Polling {
+	case "on":
+		pollInterval = cfg.PollInterval
+	case "off":
+		pollInterval = 0
+	case "", "auto":
+		if isInsideContainer() {
+			pollInterval = cfg.PollInterval
+			l.Info(fmt.Sprintf("container detected → polling mode (%s)", pollInterval))
+		}
+	default:
+		return nil, fmt.Errorf("invalid polling mode %q (expected auto|on|off)", cfg.Polling)
+	}
+
+	return &Watcher{cfg: cfg, log: l, gitign: gi, pollInterval: pollInterval}, nil
 }
 
-// Start registers the project root with fsnotify and returns a read-only
-// channel of changed file paths. The channel is closed when ctx is cancelled.
+// Start begins watching for file changes and returns a read-only channel of
+// changed file paths. The channel is closed when ctx is cancelled.
+//
+// When pollInterval > 0, a stat-based polling loop is used instead of fsnotify.
+// This is necessary inside Docker/containers where inotify does not fire for
+// bind-mount changes from the host.
 func (w *Watcher) Start(ctx context.Context) (<-chan string, error) {
+	if w.pollInterval > 0 {
+		return w.startPolling(ctx)
+	}
+	return w.startFSNotify(ctx)
+}
+
+// startFSNotify is the default inotify/FSEvents/kqueue-based watcher.
+func (w *Watcher) startFSNotify(ctx context.Context) (<-chan string, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -124,6 +157,88 @@ func (w *Watcher) Start(ctx context.Context) (<-chan string, error) {
 	}()
 
 	return events, nil
+}
+
+// startPolling is a stat-based polling watcher. On every tick it walks the
+// directory tree, compares file modification times against a snapshot, and
+// emits paths for any file that changed. Used inside containers where inotify
+// does not fire for bind-mount changes from the host.
+func (w *Watcher) startPolling(ctx context.Context) (<-chan string, error) {
+	root := w.cfg.Path
+	if root == "" {
+		root = "."
+	}
+
+	// Build the initial snapshot before returning so the first tick only
+	// reports files that changed after Start() was called.
+	snapshot, err := w.buildSnapshot(root)
+	if err != nil {
+		return nil, fmt.Errorf("polling snapshot init failed: %w", err)
+	}
+
+	events := make(chan string, 64)
+
+	go func() {
+		defer close(events)
+
+		ticker := time.NewTicker(w.pollInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+
+			case <-ticker.C:
+				current, err := w.buildSnapshot(root)
+				if err != nil {
+					w.log.Error("polling snapshot failed: " + err.Error())
+					continue
+				}
+
+				for path, mtime := range current {
+					prev, seen := snapshot[path]
+					// Emit if file is new or its mtime advanced.
+					if !seen || mtime.After(prev) {
+						select {
+						case events <- path:
+						default:
+						}
+					}
+				}
+
+				snapshot = current
+			}
+		}
+	}()
+
+	return events, nil
+}
+
+// buildSnapshot walks root and records the modification time of every file
+// that passes shouldReload. Used by the polling watcher.
+func (w *Watcher) buildSnapshot(root string) (map[string]time.Time, error) {
+	snapshot := make(map[string]time.Time)
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if isHardIgnored(path) && path != root {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !w.shouldReload(path) {
+			return nil
+		}
+		info, err := d.Info()
+		if err == nil {
+			snapshot[path] = info.ModTime()
+		}
+		return nil
+	})
+	return snapshot, err
 }
 
 // shouldReload returns true if a change to path should trigger a rebuild.
