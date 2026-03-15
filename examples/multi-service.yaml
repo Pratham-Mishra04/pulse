@@ -1,0 +1,34 @@
+# examples/multi-service.yaml
+#
+# Running multiple services in parallel with a single `pulse` command.
+# Each service gets its own build queue, debounce window, and process lifecycle.
+# A single Ctrl+C sends SIGTERM to all services simultaneously.
+#
+# Covers the common Go monolith pattern: API server + background worker.
+
+version: 1
+
+services:
+  api:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    watch:
+      - .go
+      - go.mod
+      - go.sum
+    env:
+      PORT: 8080
+      DB_URL: postgres://localhost/myapp_dev
+
+  worker:
+    path: ./cmd/worker
+    build: go build -o ./tmp/worker ./cmd/worker
+    run: ./tmp/worker
+    watch:
+      - .go
+      - go.mod
+      - go.sum
+    env:
+      QUEUE_DSN: redis://localhost:6379
+      CONCURRENCY: 4

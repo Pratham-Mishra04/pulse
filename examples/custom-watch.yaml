@@ -1,0 +1,45 @@
+# examples/custom-watch.yaml
+#
+# Customising which files trigger a rebuild.
+#
+# By default Pulse watches: .go, go.mod, go.sum
+# Use `watch` to add extensions or exact filenames.
+# Use `ignore` to add glob patterns on top of the hardcoded ignores
+# (.git, vendor, node_modules, tmp, testdata, *_gen.go, *.pb.go).
+
+version: 1
+
+services:
+  # Rebuild when Go files OR HTML templates change.
+  api-with-templates:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    watch:
+      - .go
+      - .html
+      - .tmpl
+      - go.mod
+
+  # Ignore noisy generated/test files that change frequently but don't affect runtime builds.
+  api-ignore-mocks:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    watch:
+      - .go
+      - go.mod
+    ignore:
+      - mock_*.go      # ignore mockery-generated files in addition to *_gen.go
+      - "*_test.go"    # don't rebuild when only test files change
+
+  # Watch a config file by exact filename.
+  api-with-config:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    watch:
+      - .go
+      - go.mod
+      - config.yaml    # exact filename — rebuilds when config.yaml changes
+      - .env           # watch .env changes too

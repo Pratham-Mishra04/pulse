@@ -1,0 +1,39 @@
+# examples/tuning.yaml
+#
+# Tuning debounce and kill timeout for different project sizes and workflows.
+#
+# debounce     — quiet period after the last file event before a build fires.
+#                Rapid saves within the window are coalesced into one build.
+#                Default: 300ms. Increase for large projects or slow disks.
+#
+# kill_timeout — how long Pulse waits for SIGTERM to be handled before
+#                escalating to SIGKILL. Default: 5s.
+#                Increase for services with long graceful shutdown logic
+#                (e.g. draining in-flight HTTP requests, flushing DB connections).
+
+version: 1
+
+services:
+  # Fast feedback for small projects — short debounce, quick kill.
+  small-service:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    debounce: 100ms
+    kill_timeout: 2s
+
+  # Large project — longer debounce to avoid triggering on every IDE autosave.
+  # If your IDE saves 3 files in a burst, a 500ms window catches all of them.
+  large-service:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    debounce: 500ms
+
+  # Service with slow graceful shutdown (e.g. drains connections, flushes cache).
+  # Give it 30s to shut down cleanly before SIGKILL.
+  long-shutdown:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    kill_timeout: 30s
