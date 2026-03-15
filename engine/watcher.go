@@ -122,40 +122,12 @@ func (w *Watcher) startFSNotify(ctx context.Context) (<-chan string, error) {
 			select {
 			case <-ctx.Done():
 				return
-
 			case ev, ok := <-fsw.Events:
 				if !ok {
 					// fsnotify closed its events channel — shut down.
 					return
 				}
-				// When a new directory is created, register it with fsnotify so
-				// files created inside it are also watched.
-				if ev.Op&fsnotify.Create != 0 {
-					if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
-						if !isHardIgnored(ev.Name) {
-							if err := addDirsRecursive(fsw, ev.Name); err != nil {
-								w.log.Verbose("watcher: failed to watch new dir " + ev.Name + ": " + err.Error())
-							}
-						}
-					}
-				}
-				// Only care about writes and newly created files.
-				// Rename/chmod/remove do not need a rebuild.
-				if ev.Op&(fsnotify.Write|fsnotify.Create) == 0 {
-					continue
-				}
-				if !w.shouldReload(w.relPathForFilter(ev.Name)) {
-					w.log.Verbose("ignored: " + ev.Name)
-					continue
-				}
-				// Non-blocking send: if the buffer is full the event is dropped.
-				// This is safe because the debounce window in Builder will coalesce
-				// the remaining events into a single build anyway.
-				select {
-				case events <- ev.Name:
-				default:
-				}
-
+				w.handleFSEvent(fsw, ev, events)
 			case err, ok := <-fsw.Errors:
 				if !ok {
 					return
@@ -166,6 +138,38 @@ func (w *Watcher) startFSNotify(ctx context.Context) (<-chan string, error) {
 	}()
 
 	return events, nil
+}
+
+// handleFSEvent processes a single fsnotify event: registering new directories
+// and forwarding relevant file changes onto the events channel.
+func (w *Watcher) handleFSEvent(fsw *fsnotify.Watcher, ev fsnotify.Event, events chan<- string) {
+	// When a new directory is created, register it with fsnotify so
+	// files created inside it are also watched.
+	if ev.Op&fsnotify.Create != 0 {
+		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
+			if !isHardIgnored(ev.Name) {
+				if err := addDirsRecursive(fsw, ev.Name); err != nil {
+					w.log.Verbose("watcher: failed to watch new dir " + ev.Name + ": " + err.Error())
+				}
+			}
+		}
+	}
+	// Only care about writes and newly created files.
+	// Rename/chmod/remove do not need a rebuild.
+	if ev.Op&(fsnotify.Write|fsnotify.Create) == 0 {
+		return
+	}
+	if !w.shouldReload(w.relPathForFilter(ev.Name)) {
+		w.log.Verbose("ignored: " + ev.Name)
+		return
+	}
+	// Non-blocking send: if the buffer is full the event is dropped.
+	// This is safe because the debounce window in Builder will coalesce
+	// the remaining events into a single build anyway.
+	select {
+	case events <- ev.Name:
+	default:
+	}
 }
 
 // startPolling is a stat-based polling watcher. On every tick it walks all

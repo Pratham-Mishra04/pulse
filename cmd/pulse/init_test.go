@@ -235,8 +235,8 @@ func TestRunInit_CreatesPulseYAML(t *testing.T) {
 
 	// Verify key fields appear in the generated YAML.
 	checks := []string{
-		"cmd/api",   // path / build target
-		"tmp/api",   // binary output path
+		"cmd/api", // path / build target
+		"tmp/api", // binary output path
 		"version:",
 	}
 	for _, check := range checks {

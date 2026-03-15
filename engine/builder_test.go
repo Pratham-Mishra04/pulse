@@ -206,7 +206,7 @@ func TestEnqueue_CancelsInFlightBuild(t *testing.T) {
 	// Enqueue and immediately enqueue again — second should cancel the first.
 	b.Enqueue()
 	time.Sleep(50 * time.Millisecond) // let debounce fire and build start
-	b.Enqueue()                      // cancel the in-flight build
+	b.Enqueue()                       // cancel the in-flight build
 
 	// The worker must produce a result eventually without deadlocking.
 	select {
