@@ -24,7 +24,26 @@ type Engine struct {
 // New creates an Engine for the named service. Returns an error if the
 // Watcher cannot be initialised (e.g. malformed .gitignore).
 func New(name string, cfg ServiceConfig, l *log.Logger) (*Engine, error) {
-	watcher, err := NewWatcher(cfg, l)
+	// Detect go.work and collect any external "use" directories as extra
+	// watch roots, unless the user has opted out via no_workspace: true.
+	var extraRoots []string
+	if !cfg.NoWorkspace {
+		projectRoot := cfg.Path
+		if projectRoot == "" {
+			projectRoot = "."
+		}
+		if goWorkPath, found := detectGoWork(projectRoot); found {
+			roots, err := externalWorkspaceDirs(goWorkPath, projectRoot)
+			if err != nil {
+				l.Verbose(fmt.Sprintf("workspace: failed to parse go.work: %v", err))
+			} else if len(roots) > 0 {
+				l.Info(fmt.Sprintf("workspace: watching %d external module(s) from go.work", len(roots)))
+				extraRoots = roots
+			}
+		}
+	}
+
+	watcher, err := NewWatcher(cfg, extraRoots, l)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create watcher: %w", err)
 	}
