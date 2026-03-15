@@ -38,7 +38,7 @@ Pulse takes the opposite approach: if the new build fails, the old binary keeps 
 ## Installation
 
 ```bash
-go install github.com/Pratham-Mishra04/pulse/cmd/pulse@latest
+go install github.com/Pratham-Mishra04/pulse@latest
 ```
 
 Or build from source:

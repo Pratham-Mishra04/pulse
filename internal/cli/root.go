@@ -1,9 +1,6 @@
-package main
+package cli
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/spf13/cobra"
 
 	"github.com/Pratham-Mishra04/pulse/internal/log"
@@ -20,11 +17,9 @@ var (
 	flagConfig  string
 )
 
-func main() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+// Execute is the entry point called by main.
+func Execute() error {
+	return rootCmd.Execute()
 }
 
 var rootCmd = &cobra.Command{
