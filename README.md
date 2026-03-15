@@ -2,25 +2,11 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/Pratham-Mishra04/pulse)](https://goreportcard.com/report/github.com/Pratham-Mishra04/pulse)
 
-![Pulse banner](media/banner.png)
-
 **Live reload for any project. Your server stays alive when a build fails.**
 
 Pulse watches your source files, rebuilds on change, and restarts your process — but unlike other live-reload tools, it **keeps the old process running** when a build fails. You always have a working server, even mid-refactor.
 
-```
-$ pulse
-
-21:03:01 [api] build  230ms ✓
-21:03:01 [api] start  pid=48291
-21:03:14 [api] change internal/handler/user.go
-21:03:14 [api] build  failed ✗
-           ./internal/handler/user.go:42:3: undefined: db.Queryx
-21:03:14 [api] keeping pid=48291   ← old server still running
-21:03:17 [api] change internal/handler/user.go
-21:03:17 [api] build  198ms ✓
-21:03:17 [api] restart pid=48312
-```
+![Pulse banner](media/banner.png)
 
 ---
 
