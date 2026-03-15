@@ -79,6 +79,13 @@ type ServiceConfig struct {
 	// Defaults to 500ms. Only meaningful when Polling is "on" or "auto" and a
 	// container is detected.
 	PollInterval time.Duration `yaml:"poll_interval"`
+
+	// NoWorkspace disables automatic go.work detection and watching.
+	// By default Pulse finds go.work (walking up from CWD) and adds any
+	// "use" directories outside the project root as extra watch roots so that
+	// changes to shared workspace modules trigger a rebuild.
+	// Set to true to opt out of this behaviour.
+	NoWorkspace bool `yaml:"no_workspace"`
 }
 
 // Config is the top-level structure of pulse.yaml.
