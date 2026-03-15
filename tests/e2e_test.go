@@ -328,7 +328,7 @@ func buildPulse() (string, func(), error) {
 		return "", nil, err
 	}
 
-	cmd := exec.Command("go", "build", "-o", bin, "./cmd/pulse")
+	cmd := exec.Command("go", "build", "-o", bin, ".")
 	cmd.Dir = root
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
