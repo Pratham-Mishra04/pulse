@@ -1,0 +1,42 @@
+# examples/workspace.yaml
+#
+# Go workspace (go.work) support.
+#
+# Problem: in a monorepo you often have shared libraries living outside the
+# service directory. Editing ../shared/auth/user.go should rebuild the api
+# service, but Pulse would normally miss it — it only watches the project root.
+#
+# Solution: Pulse auto-detects go.work (walking up from CWD) and adds any
+# "use" directories that fall outside the project root as extra watch roots.
+# No config needed in the common case.
+#
+# Typical layout:
+#
+#   /workspace/
+#   ├── api/                  ← project root (run pulse here)
+#   │   ├── go.mod
+#   │   ├── go.work           ← references ../shared
+#   │   ├── cmd/api/
+#   │   └── pulse.yaml
+#   └── shared/               ← external workspace module
+#       └── go.mod
+#
+# go.work:
+#
+#   go 1.22
+#   use .
+#   use ../shared             ← Pulse will watch this automatically
+
+version: 1
+
+services:
+  api:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+
+    # no_workspace: false is the default — go.work is auto-detected and any
+    # external "use" directories are added as extra watch roots automatically.
+    # Uncomment the line below to disable this behaviour (e.g. the external
+    # module changes so rarely that you prefer to restart Pulse manually).
+    # no_workspace: true

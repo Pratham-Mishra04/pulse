@@ -15,7 +15,7 @@ func TestPollingWatcher_DetectsNewFile(t *testing.T) {
 		Polling:      "on",
 		PollInterval: 50 * time.Millisecond,
 	}
-	w, err := NewWatcher(cfg, testLogger())
+	w, err := NewWatcher(cfg, nil, testLogger())
 	if err != nil {
 		t.Fatalf("NewWatcher: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestPollingWatcher_DetectsModifiedFile(t *testing.T) {
 		Watch: []string{".go"},
 		Polling: "on", PollInterval: 50 * time.Millisecond,
 	}
-	w, err := NewWatcher(cfg, testLogger())
+	w, err := NewWatcher(cfg, nil, testLogger())
 	if err != nil {
 		t.Fatalf("NewWatcher: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestPollingWatcher_IgnoresNonWatchedExtension(t *testing.T) {
 		Watch: []string{".go"},
 		Polling: "on", PollInterval: 50 * time.Millisecond,
 	}
-	w, err := NewWatcher(cfg, testLogger())
+	w, err := NewWatcher(cfg, nil, testLogger())
 	if err != nil {
 		t.Fatalf("NewWatcher: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestPollingWatcher_ClosesChannelOnCancel(t *testing.T) {
 		Watch: []string{".go"},
 		Polling: "on", PollInterval: 50 * time.Millisecond,
 	}
-	w, err := NewWatcher(cfg, testLogger())
+	w, err := NewWatcher(cfg, nil, testLogger())
 	if err != nil {
 		t.Fatalf("NewWatcher: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestNewWatcher_PollingOn(t *testing.T) {
 		Polling:      "on",
 		PollInterval: 200 * time.Millisecond,
 	}
-	w, err := NewWatcher(cfg, testLogger())
+	w, err := NewWatcher(cfg, nil, testLogger())
 	if err != nil {
 		t.Fatalf("NewWatcher: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestNewWatcher_PollingOff(t *testing.T) {
 		Watch:   []string{".go"},
 		Polling: "off",
 	}
-	w, err := NewWatcher(cfg, testLogger())
+	w, err := NewWatcher(cfg, nil, testLogger())
 	if err != nil {
 		t.Fatalf("NewWatcher: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestNewWatcher_PollingAutoDefault(t *testing.T) {
 		Watch:   []string{".go"},
 		Polling: "auto",
 	}
-	w, err := NewWatcher(cfg, testLogger())
+	w, err := NewWatcher(cfg, nil, testLogger())
 	if err != nil {
 		t.Fatalf("NewWatcher: %v", err)
 	}
