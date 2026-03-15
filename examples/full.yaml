@@ -79,3 +79,14 @@ services:
     # Disable stdin forwarding. Useful in CI or non-interactive environments.
     # Default: false (stdin is forwarded)
     no_stdin: false
+
+    # ── Polling ──────────────────────────────────────────────────────────────
+    # Controls the file-watching strategy.
+    #   "auto" (default) — inotify normally; switch to polling when a Docker
+    #                      container is detected automatically.
+    #   "on"             — always poll (use when auto-detection fails).
+    #   "off"            — always use inotify, never poll.
+    polling: auto
+
+    # Tick rate when polling is active. Default: 500ms.
+    poll_interval: 500ms
