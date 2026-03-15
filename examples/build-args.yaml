@@ -1,0 +1,39 @@
+# examples/build-args.yaml
+#
+# Passing build-time flags to the Go compiler.
+# Pulse uses a shell lexer (shlex) so quoted arguments with spaces
+# are handled correctly — unlike tools that use strings.Split.
+#
+# Covers:
+#   - -ldflags to inject version info at build time
+#   - -tags to enable build tags (e.g. dev-only routes, feature flags)
+#   - -race to enable the race detector during development
+#   - Multiple ldflags values in a single quoted string
+
+version: 1
+
+services:
+  # Inject version and build metadata via ldflags.
+  # The quoted value "-X main.Version=dev -X main.Commit=local" is kept
+  # as a single argument — no splitting on the space inside the quotes.
+  api:
+    path: ./cmd/api
+    build: go build -ldflags "-X main.Version=dev -X main.Commit=local" -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+
+  # Build tags: enable dev-only code paths (e.g. seed routes, debug middleware).
+  api-dev:
+    path: ./cmd/api
+    build: go build -tags dev,debug -o ./tmp/api-dev ./cmd/api
+    run: ./tmp/api-dev
+    env:
+      PORT: "8081"
+
+  # Race detector: catch data races in development.
+  # Binaries built with -race are ~2x slower but catch races at runtime.
+  api-race:
+    path: ./cmd/api
+    build: go build -race -o ./tmp/api-race ./cmd/api
+    run: ./tmp/api-race
+    env:
+      PORT: "8082"

@@ -1,0 +1,35 @@
+# examples/ci.yaml
+#
+# CI / non-interactive environment configuration.
+#
+# In CI you typically want:
+#   - no_stdin: true     — don't attempt to forward stdin (no TTY available)
+#   - Short kill_timeout — don't hang on zombie processes
+#   - Strict hooks       — fail fast if codegen or tests don't pass
+#
+# Run with: RUN_E2E=1 pulse --config examples/ci.yaml --quiet
+
+version: 1
+
+services:
+  api:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    no_stdin: true
+    kill_timeout: 5s
+    debounce: 100ms
+
+    # Strict pre hook: generated code must be up-to-date before building.
+    # In CI this catches "forgot to commit generated files" mistakes early.
+    pre: go generate ./...
+    pre_strict: true
+
+    # Strict post hook: the service must pass a health check after restart.
+    post: curl --silent --fail --retry 5 --retry-delay 1 http://localhost:8080/healthz
+    post_strict: true
+
+    env:
+      PORT: 8080
+      ENV: ci
+      LOG_LEVEL: error    # reduce noise in CI logs

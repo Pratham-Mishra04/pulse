@@ -1,0 +1,67 @@
+# examples/hooks.yaml
+#
+# Pre and post build hooks.
+#
+# pre  — runs before each build. Non-strict by default: failure is logged
+#        but the build proceeds. Set pre_strict: true to abort the build on
+#        failure (old process stays alive, same as a compile error).
+#
+# post — runs after each successful restart. Non-strict by default: failure
+#        is logged but the new process is never killed. Set post_strict: true
+#        to log a hard error on failure (process still stays running).
+
+version: 1
+
+services:
+  # Code generation before build.
+  # Non-strict: a template error won't block a Go-only change from rebuilding.
+  api-with-templates:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    pre: templ generate
+    watch:
+      - .go
+      - .templ
+
+  # Strict code generation: the generated files must be up-to-date before
+  # compiling. If go generate fails, the old binary keeps running.
+  api-strict-generate:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    pre: go generate ./...
+    pre_strict: true
+
+  # Protobuf generation before build.
+  # Strict: a broken .proto means the generated Go code would be wrong.
+  grpc-service:
+    path: ./cmd/grpc
+    build: go build -o ./tmp/grpc ./cmd/grpc
+    run: ./tmp/grpc
+    pre: protoc --go_out=. --go-grpc_out=. proto/service.proto
+    pre_strict: true
+    watch:
+      - .go
+      - .proto
+
+  # Smoke test after restart.
+  # Non-strict: a flaky test won't kill your dev loop.
+  api-with-smoke:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    post: ./scripts/smoke-test.sh
+    env:
+      PORT: "8080"
+
+  # Strict smoke test: fail loudly if the new process isn't healthy.
+  # The process is NOT killed on post failure — it is already running.
+  api-strict-smoke:
+    path: ./cmd/api
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    post: curl --silent --fail http://localhost:8080/healthz
+    post_strict: true
+    env:
+      PORT: "8080"
