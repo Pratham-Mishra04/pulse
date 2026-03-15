@@ -266,7 +266,7 @@ func TestWatcher_Start_EmitsEventOnFileChange(t *testing.T) {
 		Path:  dir,
 		Watch: []string{".go"},
 	}
-	w, err := NewWatcher(cfg, testLogger())
+	w, err := NewWatcher(cfg, nil, testLogger())
 	if err != nil {
 		t.Fatalf("NewWatcher: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestWatcher_Start_IgnoresNonWatchedExtension(t *testing.T) {
 		Path:  dir,
 		Watch: []string{".go"},
 	}
-	w, err := NewWatcher(cfg, testLogger())
+	w, err := NewWatcher(cfg, nil, testLogger())
 	if err != nil {
 		t.Fatalf("NewWatcher: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestWatcher_Start_IgnoresNonWatchedExtension(t *testing.T) {
 func TestWatcher_Start_ClosesChannelOnCancel(t *testing.T) {
 	dir := t.TempDir()
 	cfg := ServiceConfig{Path: dir, Watch: []string{".go"}}
-	w, err := NewWatcher(cfg, testLogger())
+	w, err := NewWatcher(cfg, nil, testLogger())
 	if err != nil {
 		t.Fatalf("NewWatcher: %v", err)
 	}

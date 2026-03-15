@@ -33,9 +33,12 @@ type Watcher struct {
 	log          *log.Logger
 	gitign       *ignore.GitIgnore // nil if no .gitignore found
 	pollInterval time.Duration     // 0 = use fsnotify, >0 = use polling loop
+	watchRoots   []string          // directories to watch: primary + any go.work extras
 }
 
-func NewWatcher(cfg ServiceConfig, l *log.Logger) (*Watcher, error) {
+// NewWatcher creates a Watcher for cfg. extraRoots contains any additional
+// directories to watch beyond cfg.Path (e.g. external go.work modules).
+func NewWatcher(cfg ServiceConfig, extraRoots []string, l *log.Logger) (*Watcher, error) {
 	// .gitignore is optional — if it doesn't exist, gitign stays nil and
 	// MatchesPath is never called. Only return an error if the file exists
 	// but cannot be parsed.
@@ -64,7 +67,16 @@ func NewWatcher(cfg ServiceConfig, l *log.Logger) (*Watcher, error) {
 		return nil, fmt.Errorf("invalid polling mode %q (expected auto|on|off)", cfg.Polling)
 	}
 
-	return &Watcher{cfg: cfg, log: l, gitign: gi, pollInterval: pollInterval}, nil
+	// Build the ordered list of watch roots: primary dir first, then extras.
+	primary := cfg.Path
+	if primary == "" {
+		primary = "."
+	}
+	watchRoots := make([]string, 0, 1+len(extraRoots))
+	watchRoots = append(watchRoots, primary)
+	watchRoots = append(watchRoots, extraRoots...)
+
+	return &Watcher{cfg: cfg, log: l, gitign: gi, pollInterval: pollInterval, watchRoots: watchRoots}, nil
 }
 
 // Start begins watching for file changes and returns a read-only channel of
@@ -87,17 +99,14 @@ func (w *Watcher) startFSNotify(ctx context.Context) (<-chan string, error) {
 		return nil, err
 	}
 
-	root := w.cfg.Path
-	if root == "" {
-		root = "."
-	}
-
-	// Recursively add all non-ignored subdirectories to fsnotify.
+	// Register every watch root (primary dir + any go.work external modules).
 	// fsnotify requires each directory to be registered explicitly — it does
-	// not watch subdirectories automatically.
-	if err := addDirsRecursive(fsw, root); err != nil {
-		fsw.Close()
-		return nil, err
+	// not recurse automatically.
+	for _, root := range w.watchRoots {
+		if err := addDirsRecursive(fsw, root); err != nil {
+			fsw.Close()
+			return nil, err
+		}
 	}
 
 	// Buffer of 64 absorbs bursts of rapid events (e.g. IDE atomic writes
@@ -135,7 +144,7 @@ func (w *Watcher) startFSNotify(ctx context.Context) (<-chan string, error) {
 				if ev.Op&(fsnotify.Write|fsnotify.Create) == 0 {
 					continue
 				}
-				if !w.shouldReload(ev.Name) {
+				if !w.shouldReload(w.relPathForFilter(ev.Name)) {
 					w.log.Verbose("ignored: " + ev.Name)
 					continue
 				}
@@ -159,19 +168,14 @@ func (w *Watcher) startFSNotify(ctx context.Context) (<-chan string, error) {
 	return events, nil
 }
 
-// startPolling is a stat-based polling watcher. On every tick it walks the
-// directory tree, compares file modification times against a snapshot, and
-// emits paths for any file that changed. Used inside containers where inotify
-// does not fire for bind-mount changes from the host.
+// startPolling is a stat-based polling watcher. On every tick it walks all
+// watch roots, compares file modification times against a snapshot, and emits
+// paths for any file that changed. Used inside containers where inotify does
+// not fire for bind-mount changes from the host.
 func (w *Watcher) startPolling(ctx context.Context) (<-chan string, error) {
-	root := w.cfg.Path
-	if root == "" {
-		root = "."
-	}
-
 	// Build the initial snapshot before returning so the first tick only
 	// reports files that changed after Start() was called.
-	snapshot, err := w.buildSnapshot(root)
+	snapshot, err := w.buildSnapshot()
 	if err != nil {
 		return nil, fmt.Errorf("polling snapshot init failed: %w", err)
 	}
@@ -190,7 +194,7 @@ func (w *Watcher) startPolling(ctx context.Context) (<-chan string, error) {
 				return
 
 			case <-ticker.C:
-				current, err := w.buildSnapshot(root)
+				current, err := w.buildSnapshot()
 				if err != nil {
 					w.log.Error("polling snapshot failed: " + err.Error())
 					continue
@@ -215,30 +219,42 @@ func (w *Watcher) startPolling(ctx context.Context) (<-chan string, error) {
 	return events, nil
 }
 
-// buildSnapshot walks root and records the modification time of every file
-// that passes shouldReload. Used by the polling watcher.
-func (w *Watcher) buildSnapshot(root string) (map[string]time.Time, error) {
+// buildSnapshot walks all watch roots and records the modification time of
+// every file that passes shouldReload. Used by the polling watcher.
+func (w *Watcher) buildSnapshot() (map[string]time.Time, error) {
 	snapshot := make(map[string]time.Time)
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			if isHardIgnored(path) && path != root {
-				return filepath.SkipDir
+	for _, root := range w.watchRoots {
+		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				if isHardIgnored(path) && path != root {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			// Use a root-relative path for filtering so that hard-ignored
+			// segment checks don't fire on absolute path components that
+			// belong to the root itself (e.g. /home/user/vendor/mylib).
+			relPath, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				relPath = path
+			}
+			if !w.shouldReload(relPath) {
+				return nil
+			}
+			info, err := d.Info()
+			if err == nil {
+				snapshot[path] = info.ModTime()
 			}
 			return nil
+		})
+		if err != nil {
+			return snapshot, err
 		}
-		if !w.shouldReload(path) {
-			return nil
-		}
-		info, err := d.Info()
-		if err == nil {
-			snapshot[path] = info.ModTime()
-		}
-		return nil
-	})
-	return snapshot, err
+	}
+	return snapshot, nil
 }
 
 // shouldReload returns true if a change to path should trigger a rebuild.
@@ -281,6 +297,32 @@ func (w *Watcher) shouldReload(path string) bool {
 
 	// Nothing matched — ignore.
 	return false
+}
+
+// relPathForFilter returns path relative to whichever watch root it falls under.
+// This ensures shouldReload's segment-based checks don't fire on path components
+// that are part of the root prefix (e.g. /home/user/vendor/mylib/foo.go should
+// not be excluded just because "vendor" appears in the absolute root path).
+// If no root matches, path is returned unchanged.
+func (w *Watcher) relPathForFilter(path string) string {
+	pathAbs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	for _, root := range w.watchRoots {
+		rootAbs, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(rootAbs, pathAbs)
+		if err != nil {
+			continue
+		}
+		if !strings.HasPrefix(rel, "..") {
+			return rel
+		}
+	}
+	return path
 }
 
 // containsSegment returns true if any path segment equals the given segment.
