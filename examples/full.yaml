@@ -1,0 +1,81 @@
+# examples/full.yaml
+#
+# Every available pulse.yaml option in one place.
+# Use this as a reference when writing your own config.
+#
+# Required fields: run
+# Optional fields: build and all others (shown with defaults where applicable)
+# If `build` is omitted, the service is treated as a plain process.
+
+version: 1
+
+services:
+  api:
+    # ── Source location ──────────────────────────────────────────────────────
+    # Directory containing the Go package to build.
+    # Used as the base path for file watching.
+    path: ./cmd/api
+
+    # ── Build command ────────────────────────────────────────────────────────
+    # Full shell command to compile the binary.
+    # Quoted arguments with spaces are handled correctly:
+    #   -ldflags "-X main.Version=dev -X main.Commit=abc" stays as one token.
+    build: go build -ldflags "-X main.Version=dev" -tags dev -o ./tmp/api ./cmd/api
+
+    # ── Run command ──────────────────────────────────────────────────────────
+    # Command to start the compiled binary. Can include arguments.
+    run: ./tmp/api --port 8080 --log-level debug
+
+    # ── File watching ────────────────────────────────────────────────────────
+    # Extensions or exact filenames that trigger a rebuild.
+    # Default: [".go", "go.mod", "go.sum"]
+    watch:
+      - .go
+      - .templ
+      - .html
+      - go.mod
+      - go.sum
+      - config.yaml
+
+    # Additional glob patterns to exclude (applied to the base filename).
+    # Hardcoded ignores (.git, vendor, node_modules, tmp, testdata,
+    # *_gen.go, *.pb.go) are always active regardless of this list.
+    ignore:
+      - mock_*.go
+      - "*_test.go"
+
+    # ── Environment variables ────────────────────────────────────────────────
+    # Injected into the child process on top of the parent environment.
+    env:
+      PORT: 8080
+      DB_URL: postgres://localhost/myapp_dev
+      REDIS_ADDR: localhost:6379
+      LOG_LEVEL: debug
+
+    # ── Hooks ────────────────────────────────────────────────────────────────
+    # pre: command run before each build.
+    # pre_strict: if true, pre failure aborts the build; old process kept alive.
+    pre: go generate ./...
+    pre_strict: false
+
+    # post: command run after each successful restart.
+    # post_strict: if true, post failure logs a hard error.
+    #              The new process is NEVER killed due to a post failure.
+    post: curl --silent --fail http://localhost:8080/healthz
+    post_strict: false
+
+    # ── Timing ───────────────────────────────────────────────────────────────
+    # Quiet period after the last file event before a build fires.
+    # Rapid saves within the window are coalesced into one build.
+    # Default: 300ms
+    debounce: 300ms
+
+    # How long to wait for SIGTERM before escalating to SIGKILL.
+    # Increase for services with long graceful shutdown (e.g. connection drain).
+    # Default: 5s
+    kill_timeout: 5s
+
+    # ── Stdin ────────────────────────────────────────────────────────────────
+    # Disable stdin forwarding. Useful in CI or non-interactive environments.
+    # Default: false (stdin is forwarded)
+    no_stdin: false
