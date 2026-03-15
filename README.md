@@ -45,7 +45,7 @@ make install
 
 ```bash
 # In your project root (where go.mod lives):
-pulse init ./cmd/api
+pulse init ./path/to/main.go
 
 # Start watching:
 pulse
