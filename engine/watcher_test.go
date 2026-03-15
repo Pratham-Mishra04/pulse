@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 // ── containsSegment ───────────────────────────────────────────────────────────
@@ -169,11 +171,11 @@ func TestShouldReload_GeneratedFiles(t *testing.T) {
 		path string
 		want bool
 	}{
-		{"./internal/wire_gen.go", false},  // _gen.go suffix
-		{"./proto/user.pb.go", false},      // .pb.go suffix
-		{"./internal/handler.go", true},    // normal .go file
-		{"./cmd/api/main.go", true},        // normal .go file
-		{"./gen/generated_gen.go", false},  // both gen + _gen.go
+		{"./internal/wire_gen.go", false}, // _gen.go suffix
+		{"./proto/user.pb.go", false},     // .pb.go suffix
+		{"./internal/handler.go", true},   // normal .go file
+		{"./cmd/api/main.go", true},       // normal .go file
+		{"./gen/generated_gen.go", false}, // both gen + _gen.go
 	}
 	for _, tc := range cases {
 		got := w.shouldReload(tc.path)
@@ -184,13 +186,15 @@ func TestShouldReload_GeneratedFiles(t *testing.T) {
 }
 
 func TestShouldReload_UserIgnorePatterns(t *testing.T) {
+	// Use a pattern that only matches the user-configured ignore list —
+	// NOT any built-in generated-file exclusion — so the test actually
+	// exercises cfg.Ignore and would fail if that code path were removed.
 	w := newTestWatcher(ServiceConfig{
 		Watch:  []string{".go"},
-		Ignore: []string{"*.pb.go"},
+		Ignore: []string{"*_skip.go"},
 	})
-	// filepath.Match is applied to the base name, so "user.pb.go" matches "*.pb.go".
-	if w.shouldReload("./internal/proto/user.pb.go") {
-		t.Error("shouldReload('./internal/proto/user.pb.go') = true, want false (user ignore)")
+	if w.shouldReload("./internal/proto/user_skip.go") {
+		t.Error("shouldReload('./internal/proto/user_skip.go') = true, want false (user ignore)")
 	}
 	// Normal .go file must still pass through.
 	if !w.shouldReload("./internal/handler.go") {
@@ -219,38 +223,36 @@ func TestAddDirsRecursive_SkipsHardIgnored(t *testing.T) {
 		}
 	}
 
-	registered := map[string]bool{}
-	// Use a fake walk to collect what would be registered (without real fsnotify).
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if !d.IsDir() {
-			return nil
-		}
-		if isHardIgnored(path) && path != root {
-			return filepath.SkipDir
-		}
-		registered[path] = true
-		return nil
-	})
+	// Use the real production function with a real fsnotify watcher,
+	// then inspect WatchList() to verify which paths were registered.
+	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("fsnotify.NewWatcher: %v", err)
+	}
+	defer fsw.Close()
+
+	if err := addDirsRecursive(fsw, root); err != nil {
+		t.Fatalf("addDirsRecursive: %v", err)
 	}
 
-	if !registered[root] {
+	watched := map[string]bool{}
+	for _, p := range fsw.WatchList() {
+		watched[p] = true
+	}
+
+	if !watched[root] {
 		t.Error("root should be registered")
 	}
 	internalPath := filepath.Join(root, "internal")
-	if !registered[internalPath] {
+	if !watched[internalPath] {
 		t.Error("internal/ should be registered")
 	}
 	vendorPath := filepath.Join(root, "vendor")
-	if registered[vendorPath] {
+	if watched[vendorPath] {
 		t.Error("vendor/ should NOT be registered (hard ignored)")
 	}
 	vendorFooPath := filepath.Join(root, "vendor", "foo")
-	if registered[vendorFooPath] {
+	if watched[vendorFooPath] {
 		t.Error("vendor/foo/ should NOT be registered (inside hard ignored)")
 	}
 }
