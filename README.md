@@ -1,8 +1,8 @@
 # Pulse
 
-**Live reload for Go. Your server stays alive when a build fails.**
+**Live reload for any project. Your server stays alive when a build fails.**
 
-Pulse watches your source files, rebuilds on change, and restarts your binary — but unlike other live-reload tools, it **keeps the old process running** when a build fails. You always have a working server, even mid-refactor.
+Pulse watches your source files, rebuilds on change, and restarts your process — but unlike other live-reload tools, it **keeps the old process running** when a build fails. You always have a working server, even mid-refactor.
 
 ```
 $ pulse
@@ -108,8 +108,10 @@ version: 1
 services:
   api:
     # Required
+    run: ./tmp/api --port 8080 # command to start the process
+
+    # Optional — omit entirely for plain-process services (no compile step)
     build: go build -o ./tmp/api ./cmd/api # shell command to compile
-    run: ./tmp/api --port 8080 # command to start the binary
 
     # Source location
     path: ./cmd/api # working dir for build (default: project root)
@@ -152,8 +154,8 @@ services:
 
 | Field           | Default                 | Description                                           |
 | --------------- | ----------------------- | ----------------------------------------------------- |
-| `build`         | required                | Shell command to compile the service                  |
-| `run`           | required                | Command to start the compiled binary                  |
+| `build`         | `""`                    | Shell command to compile the service (optional — omit for plain-process services) |
+| `run`           | required                | Command to start the process                          |
 | `path`          | `.`                     | Working directory for the build command               |
 | `watch`         | `[.go, go.mod, go.sum]` | Extensions or filenames that trigger a rebuild        |
 | `ignore`        | `[]`                    | Glob patterns excluded from watching (base filename)  |
@@ -264,6 +266,70 @@ Each service runs in its own goroutine. Log output is prefixed with the service 
 21:03:01 [api]    start  pid=48291
 21:03:01 [worker] start  pid=48292
 ```
+
+---
+
+## Not Just for Go
+
+Pulse works with any language or toolchain. The `build` and `run` fields are plain shell commands — there is nothing Go-specific about the core watch → build → restart loop.
+
+`build` is optional. If you omit it, Pulse skips the compile step and restarts the process directly on file changes. This is useful for interpreted languages, bundlers, or any long-running process you want to auto-restart.
+
+**Node.js / TypeScript**
+
+```yaml
+version: 1
+services:
+  server:
+    run: node src/index.js
+    watch:
+      - .js
+      - .json
+```
+
+```yaml
+version: 1
+services:
+  app:
+    build: npx tsc --noEmit
+    run: node dist/index.js
+    watch:
+      - .ts
+```
+
+**Python**
+
+```yaml
+version: 1
+services:
+  api:
+    run: python app.py
+    watch:
+      - .py
+```
+
+**Fullstack (Go backend + frontend asset pipeline)**
+
+```yaml
+version: 1
+services:
+  api:
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    watch: [.go, .templ, go.mod]
+
+  css:
+    run: npx tailwindcss -i ./assets/app.css -o ./static/app.css --watch
+    watch: [.css, .html, .templ]
+    no_stdin: true
+
+  js:
+    run: npx esbuild src/main.ts --bundle --outfile=static/app.js --watch
+    watch: [.ts, .tsx]
+    no_stdin: true
+```
+
+The keep-alive behaviour applies equally to all services — if the CSS watcher crashes, the Go API keeps running.
 
 ---
 

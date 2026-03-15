@@ -167,9 +167,6 @@ func LoadConfig(path string) (Config, error) {
 		}
 		svc.expandEnv()
 		svc.applyDefaults()
-		if svc.Build == "" {
-			return Config{}, fmt.Errorf("service %q: build command is required", name)
-		}
 		if svc.Run == "" {
 			return Config{}, fmt.Errorf("service %q: run command is required", name)
 		}
