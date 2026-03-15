@@ -3,6 +3,7 @@ package log
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -188,6 +189,67 @@ func (l *Logger) Skip(name, reason string) {
 		name,
 		styleDim.Render("("+reason+")"),
 	)
+}
+
+// ServiceInfo is a minimal descriptor passed to Banner so the log package
+// does not need to import the engine package.
+type ServiceInfo struct {
+	Name     string
+	Path     string
+	Watch    []string
+	Debounce string
+}
+
+// Banner prints the startup widget once before the engine begins watching.
+// Suppressed in quiet mode.
+func (l *Logger) Banner(version, goVersion, configPath string, services []ServiceInfo) {
+	if l.level == LogLevelQuiet {
+		return
+	}
+
+	styleArt     := lipgloss.NewStyle().Foreground(lipgloss.Color("99"))
+	styleTag     := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	styleSvcName := lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true)
+	stylePath    := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	styleDot     := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	styleWatch   := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+
+	// ANSI-shadow figlet art for "PULSE".
+	// S column taken from BIFROST brand art.
+	const (
+		art0 = `██████╗ ██╗   ██╗██╗     ███████╗███████╗`
+		art1 = `██╔══██╗██║   ██║██║     ██╔════╝██╔════╝`
+		art2 = `██████╔╝██║   ██║██║     ███████╗█████╗  `
+		art3 = `██╔═══╝ ██║   ██║██║     ╚════██║██╔══╝  `
+		art4 = `██║     ╚██████╔╝███████╗███████║███████╗`
+		art5 = `╚═╝      ╚═════╝ ╚══════╝╚══════╝╚══════╝`
+	)
+
+	fmt.Println()
+	fmt.Println(styleArt.Render(art0))
+	fmt.Println(styleArt.Render(art1))
+	fmt.Println(styleArt.Render(art2))
+	fmt.Println(styleArt.Render(art3))
+	fmt.Println(styleArt.Render(art4))
+	fmt.Printf("%s  %s\n\n",
+		styleArt.Render(art5),
+		styleTag.Render("v"+version+" · "+goVersion),
+	)
+
+	for _, svc := range services {
+		path := svc.Path
+		if path == "" {
+			path = "."
+		}
+		exts := strings.Join(svc.Watch, "  ")
+		fmt.Printf("  %s  %s  %s  %s\n",
+			styleSvcName.Render(svc.Name),
+			stylePath.Render(path),
+			styleDot.Render("·"),
+			styleWatch.Render(exts),
+		)
+	}
+	fmt.Println()
 }
 
 // Verbose prints only at LogLevelVerbose.

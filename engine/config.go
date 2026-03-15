@@ -105,6 +105,18 @@ const (
 	DefaultKillTimeout = 5 * time.Second
 )
 
+// expandEnv replaces ${VAR} and $VAR references in command and path fields
+// with their values from the environment. This lets pulse.yaml stay free of
+// hardcoded values — callers can export HOST=localhost PORT=8080 etc. before
+// running pulse and the substitution happens at load time.
+func (s *ServiceConfig) expandEnv() {
+	s.Path = os.ExpandEnv(s.Path)
+	s.Build = os.ExpandEnv(s.Build)
+	s.Run = os.ExpandEnv(s.Run)
+	s.Pre = os.ExpandEnv(s.Pre)
+	s.Post = os.ExpandEnv(s.Post)
+}
+
 // applyDefaults fills in zero-value fields with sensible defaults.
 // Called for every service after loading pulse.yaml.
 func (s *ServiceConfig) applyDefaults() {
@@ -153,6 +165,7 @@ func LoadConfig(path string) (Config, error) {
 		if svc.PollInterval < 0 {
 			return Config{}, fmt.Errorf("service %q: poll_interval must be >= 0", name)
 		}
+		svc.expandEnv()
 		svc.applyDefaults()
 		if svc.Build == "" {
 			return Config{}, fmt.Errorf("service %q: build command is required", name)

@@ -31,7 +31,6 @@ type Builder struct {
 	// current holds the cancel function of the currently running build.
 	// Buffered at 1 — acts as a semaphore. When a new Enqueue() arrives,
 	// it drains this channel and calls cancel() to abort the in-flight build.
-	// This is the fix for Air issue #784 (concurrent builds corrupting output).
 	current chan context.CancelFunc
 }
 
