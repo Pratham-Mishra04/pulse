@@ -1,14 +1,12 @@
 package engine
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
-
 	"time"
 
 	"github.com/google/shlex"
@@ -56,18 +54,18 @@ func NewRunner(name string, cfg ServiceConfig, l *log.Logger) *Runner {
 }
 
 // Start launches the process for the first time.
-func (r *Runner) Start(ctx context.Context, result BuildResult) error {
-	return r.launch(ctx, result)
+func (r *Runner) Start(result BuildResult) error {
+	return r.launch(result)
 }
 
 // Restart gracefully stops the current process then starts the new binary.
 // This is the core of Pulse's build-first lifecycle: Stop() is only called
 // after a successful build — never before.
-func (r *Runner) Restart(ctx context.Context, result BuildResult) error {
+func (r *Runner) Restart(result BuildResult) error {
 	if err := r.Stop(); err != nil {
 		return err
 	}
-	return r.launch(ctx, result)
+	return r.launch(result)
 }
 
 // Stop sends SIGTERM to the process group and waits up to KillTimeout for
@@ -130,7 +128,14 @@ func (r *Runner) Pid() int {
 }
 
 // launch starts the binary from result.BinPath and records the cmd and pid.
-func (r *Runner) launch(ctx context.Context, result BuildResult) error {
+//
+// Intentionally uses exec.Command (not exec.CommandContext) so that the
+// engine context cancelling does not race-kill the child with SIGKILL before
+// runner.Stop() can send SIGTERM. Shutdown is always driven by runner.Stop(),
+// which is called explicitly by the engine on ctx.Done() — this preserves the
+// graceful SIGTERM → KillTimeout → SIGKILL path and lets the child flush its
+// closing logs on both Ctrl-C and restart.
+func (r *Runner) launch(result BuildResult) error {
 	parts, err := shlex.Split(result.BinPath)
 	if err != nil {
 		return fmt.Errorf("failed to parse run command: %w", err)
@@ -138,7 +143,7 @@ func (r *Runner) launch(ctx context.Context, result BuildResult) error {
 	if len(parts) == 0 {
 		return fmt.Errorf("run command is empty")
 	}
-	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
+	cmd := exec.Command(parts[0], parts[1:]...)
 	if r.cfg.Path != "" {
 		cmd.Dir = r.cfg.Path
 	}

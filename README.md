@@ -432,7 +432,7 @@ make e2e       # end-to-end tests (spawns real processes)
 make test-all  # unit + e2e
 make lint      # go vet
 make tidy      # go mod tidy + verify
-make snapshot  # cross-compile for Linux, macOS (arm64/amd64), Windows
+make snapshot  # cross-compile for Linux, macOS (arm64/amd64)
 ```
 
 ---
@@ -443,7 +443,7 @@ make snapshot  # cross-compile for Linux, macOS (arm64/amd64), Windows
 | -------------------- | ---------------------------------- |
 | macOS (arm64, amd64) | Supported                          |
 | Linux (amd64, arm64) | Supported                          |
-| Windows (amd64)      | Supported (SIGTERM via CTRL_BREAK) |
+| Windows (amd64)      | Coming soon                        |
 | Inside Docker        | Supported (auto-polling)           |
 | Kubernetes pods      | Supported (auto-polling)           |
 
