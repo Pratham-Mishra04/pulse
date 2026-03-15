@@ -1,5 +1,9 @@
 # Pulse
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/Pratham-Mishra04/pulse)](https://goreportcard.com/report/github.com/Pratham-Mishra04/pulse)
+
+![Pulse banner](media/banner.png)
+
 **Live reload for any project. Your server stays alive when a build fails.**
 
 Pulse watches your source files, rebuilds on change, and restarts your process — but unlike other live-reload tools, it **keeps the old process running** when a build fails. You always have a working server, even mid-refactor.
