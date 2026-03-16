@@ -152,9 +152,60 @@ func newTestEngine(cfg ServiceConfig) *Engine {
 	}
 }
 
+// TestEngine_PostStrict_LeavesOldProcess is a swap-level regression test.
+// It verifies that a strict post-hook failure does not replace the running
+// process — the engine must keep the old process alive and skip the restart.
+func TestEngine_PostStrict_LeavesOldProcess(t *testing.T) {
+	dir := t.TempDir()
+	bin := writeTempGoApp(t, dir)
+
+	cfg := ServiceConfig{
+		Build:      buildCmd(dir, bin),
+		Run:        bin,
+		Post:       "false", // always fails
+		PostStrict: true,
+		NoStdin:    true,
+	}
+
+	r := NewRunner("test", cfg, testLogger())
+	e := &Engine{
+		name:    "test",
+		cfg:     cfg,
+		log:     testLogger(),
+		runner:  r,
+		builder: NewBuilder("test", cfg, testLogger()),
+	}
+
+	// Build and start the initial process.
+	result := e.builder.Build(context.Background())
+	if result.Err != nil {
+		t.Fatalf("initial build failed: %v\n%s", result.Err, result.Output)
+	}
+	if err := r.Start(result); err != nil {
+		t.Fatalf("failed to start initial process: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Stop() })
+
+	originalPID := r.Pid()
+	if originalPID == 0 {
+		t.Fatal("expected non-zero PID after start")
+	}
+
+	// Simulate a rebuild event: the post hook must fail strictly.
+	if err := e.runPostHook(context.Background()); err == nil {
+		t.Fatal("expected strict post hook to fail, got nil")
+	}
+
+	// Engine must NOT call runner.Restart on strict post failure —
+	// the old process reference (PID) must be unchanged.
+	if pid := r.Pid(); pid != originalPID {
+		t.Errorf("PID changed %d → %d: old process was replaced despite strict post failure", originalPID, pid)
+	}
+}
+
 func TestPostHook_Success(t *testing.T) {
 	e := newTestEngine(ServiceConfig{Post: "echo post-hook-ran"})
-	if err := e.runPostHook(context.Background(), true); err != nil {
+	if err := e.runPostHook(context.Background()); err != nil {
 		t.Fatalf("expected success, got: %v", err)
 	}
 }
@@ -162,36 +213,27 @@ func TestPostHook_Success(t *testing.T) {
 func TestPostHook_NoPost(t *testing.T) {
 	// Empty Post — runPostHook must be a no-op.
 	e := newTestEngine(ServiceConfig{})
-	if err := e.runPostHook(context.Background(), true); err != nil {
+	if err := e.runPostHook(context.Background()); err != nil {
 		t.Fatalf("expected nil for empty Post, got: %v", err)
 	}
 }
 
 func TestPostHook_FailureNonStrict(t *testing.T) {
-	// Non-strict post failure must NOT return an error (process keeps running).
+	// Non-strict post failure must NOT return an error — swap proceeds anyway.
 	e := newTestEngine(ServiceConfig{Post: "false", PostStrict: false})
-	if err := e.runPostHook(context.Background(), true); err != nil {
+	if err := e.runPostHook(context.Background()); err != nil {
 		t.Fatalf("non-strict post failure should not return error, got: %v", err)
 	}
 }
 
-func TestPostHook_FailureStrict_Initial(t *testing.T) {
-	// Strict post failure on initial start MUST return an error.
+func TestPostHook_FailureStrict(t *testing.T) {
+	// Strict post failure MUST return an error — caller keeps old process alive.
 	e := newTestEngine(ServiceConfig{Post: "false", PostStrict: true})
-	err := e.runPostHook(context.Background(), true)
+	err := e.runPostHook(context.Background())
 	if err == nil {
-		t.Fatal("expected error from strict post hook failure on initial start, got nil")
+		t.Fatal("expected error from strict post hook failure, got nil")
 	}
 	if !strings.Contains(err.Error(), "post hook failed") {
 		t.Errorf("expected 'post hook failed' in error, got %q", err.Error())
-	}
-}
-
-func TestPostHook_FailureStrict_Restart(t *testing.T) {
-	// Strict post failure on restart must NOT return an error — the process is
-	// already running and must not be killed (F-09 spec).
-	e := newTestEngine(ServiceConfig{Post: "false", PostStrict: true})
-	if err := e.runPostHook(context.Background(), false); err != nil {
-		t.Fatalf("strict post failure on restart should not return error, got: %v", err)
 	}
 }

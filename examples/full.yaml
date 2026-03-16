@@ -58,10 +58,14 @@ services:
     pre: go generate ./...
     pre_strict: false
 
-    # post: command run after each successful restart.
-    # post_strict: if true, post failure logs a hard error.
-    #              The new process is NEVER killed due to a post failure.
-    post: curl --silent --fail http://localhost:8080/healthz
+    # post: command run after a successful build but BEFORE the process is
+    # swapped. Because post runs before the swap, it cannot probe the new
+    # process's network endpoint — use it for static checks (vet, tests,
+    # --check flags) or commands that validate the newly built binary directly.
+    # When post_strict is false (default), a failure is logged but the swap
+    # still happens. When post_strict is true, a failure keeps the old process
+    # alive — symmetric with pre_strict aborting the build.
+    post: go vet ./...
     post_strict: false
 
     # ── Timing ───────────────────────────────────────────────────────────────

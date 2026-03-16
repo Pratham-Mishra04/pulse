@@ -57,12 +57,11 @@ func New(name string, cfg ServiceConfig, l *log.Logger) (*Engine, error) {
 	}, nil
 }
 
-// runPostHook executes the configured post hook and handles logging.
-// When isInitial is true (first startup) and PostStrict is set, a failure
-// returns an error so Run() can exit. On subsequent restarts (isInitial=false)
-// the running process is never killed due to a post hook failure — any error
-// is only logged.
-func (e *Engine) runPostHook(ctx context.Context, isInitial bool) error {
+// runPostHook executes the post hook after a successful build, before the
+// process is swapped. Returns an error if the hook fails and post_strict is
+// true — the caller should keep the old process alive without starting the new
+// binary. When post_strict is false a failure is logged but the swap proceeds.
+func (e *Engine) runPostHook(ctx context.Context) error {
 	if e.cfg.Post == "" {
 		return nil
 	}
@@ -73,13 +72,8 @@ func (e *Engine) runPostHook(ctx context.Context, isInitial bool) error {
 			e.log.Error(out)
 		}
 		if e.cfg.PostStrict {
-			if isInitial {
-				return fmt.Errorf("post hook failed: %w", err)
-			}
-			e.log.Error(fmt.Sprintf("post hook failed: %v", err))
+			return fmt.Errorf("post hook failed: %w", err)
 		}
-		// Either way, the process is already running — we never kill it due
-		// to a post hook failure (F-09 spec).
 	}
 	return nil
 }
@@ -100,11 +94,11 @@ func (e *Engine) Run(ctx context.Context) error {
 		e.log.Error(fmt.Sprintf("initial build failed:\n%s", result.Output))
 		return result.Err
 	}
-	if err := e.runner.Start(result); err != nil {
+	if err := e.runPostHook(ctx); err != nil {
+		e.log.Error(err.Error())
 		return err
 	}
-	// Run the post hook after the initial successful start.
-	if err := e.runPostHook(ctx, true); err != nil {
+	if err := e.runner.Start(result); err != nil {
 		return err
 	}
 
@@ -156,14 +150,17 @@ func (e *Engine) Run(ctx context.Context) error {
 				e.log.Keeping(e.runner.Pid())
 				continue
 			}
+			// Run the post hook before swapping — if strict and it fails,
+			// keep the old process alive and wait for the next file change.
+			if err := e.runPostHook(ctx); err != nil {
+				e.log.Error(err.Error())
+				e.log.Keeping(e.runner.Pid())
+				continue
+			}
 			// Build succeeded — stop the old process, start the new binary.
 			if err := e.runner.Restart(result); err != nil {
 				e.log.Error(err.Error())
 				continue
-			}
-			// Run the post hook after a successful restart.
-			if err := e.runPostHook(ctx, false); err != nil {
-				e.log.Error(err.Error())
 			}
 		}
 	}

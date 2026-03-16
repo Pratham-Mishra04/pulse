@@ -93,7 +93,7 @@ func (l *Logger) Info(msg string) {
 	fmt.Printf("%s%s%s %s\n", l.ts(), l.pfx(), styleInfo.Render("[pulse]"), msg)
 }
 
-// Watch prints a [watch] line for a changed file. Suppressed in quiet mode.
+// Watch prints an [edited] line for a changed file. Suppressed in quiet mode.
 func (l *Logger) Watch(file string) {
 	if l.level == LogLevelQuiet {
 		return
@@ -101,8 +101,22 @@ func (l *Logger) Watch(file string) {
 	fmt.Printf("%s%s%s %s\n",
 		l.ts(),
 		l.pfx(),
-		styleWatch.Render("[watch]"),
+		styleWatch.Render("[edited]"),
 		styleFilePath.Render(file),
+	)
+}
+
+// Building prints a [building] line when a compile step is about to start.
+// Suppressed in quiet mode.
+func (l *Logger) Building(name string) {
+	if l.level == LogLevelQuiet {
+		return
+	}
+	fmt.Printf("%s%s%s %s\n",
+		l.ts(),
+		l.pfx(),
+		styleBuild.Render("[building]"),
+		name,
 	)
 }
 
@@ -118,7 +132,7 @@ func (l *Logger) Build(name string, elapsed time.Duration, ok bool) {
 	fmt.Printf("%s%s%s %s %s %s\n",
 		l.ts(),
 		l.pfx(),
-		styleBuild.Render("[build]"),
+		styleBuild.Render("[build complete]"),
 		name,
 		styleMs.Render(fmt.Sprintf("· %dms", elapsed.Milliseconds())),
 		mark,
