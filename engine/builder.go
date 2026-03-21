@@ -201,6 +201,8 @@ func (b *Builder) Build(ctx context.Context) BuildResult {
 			Err:     fmt.Errorf("invalid build command: %w", err),
 		}
 	}
+	b.log.Building(b.name)
+
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
 	cmd.Dir = b.cfg.Path
 

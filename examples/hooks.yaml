@@ -6,9 +6,11 @@
 #        but the build proceeds. Set pre_strict: true to abort the build on
 #        failure (old process stays alive, same as a compile error).
 #
-# post — runs after each successful restart. Non-strict by default: failure
-#        is logged but the new process is never killed. Set post_strict: true
-#        to log a hard error on failure (process still stays running).
+# post — runs after a successful build but BEFORE the process is swapped.
+#        Non-strict by default: failure is logged but the swap still happens.
+#        Set post_strict: true to abort the swap on failure — the old process
+#        stays alive, identical to a build failure. This makes post_strict a
+#        true validation gate, symmetric with pre_strict.
 
 version: 1
 
@@ -46,7 +48,9 @@ services:
       - .proto
 
   # Smoke test after restart.
-  # Non-strict: a flaky test won't kill your dev loop.
+  # Non-strict: a flaky test won't kill your dev loop. Note that post runs
+  # before the swap, so this script validates the newly built binary without
+  # network probing — use a --check flag or static analysis instead of curl.
   api-with-smoke:
     path: ./cmd/api
     build: go build -o ./tmp/api ./cmd/api
@@ -55,9 +59,9 @@ services:
     env:
       PORT: "8080"
 
-  # Strict smoke test: fail loudly if the new process isn't healthy.
-  # The process is NOT killed on post failure — it is already running.
-  api-strict-smoke:
+  # Gate the swap with a health probe.
+  # post runs before the swap, so a strict failure keeps the old process alive.
+  api-health-gated:
     path: ./cmd/api
     build: go build -o ./tmp/api ./cmd/api
     run: ./tmp/api

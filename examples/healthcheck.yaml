@@ -1,0 +1,54 @@
+# examples/healthcheck.yaml
+#
+# Gating the process swap with post_strict.
+#
+# post runs after a successful build but BEFORE the old process is stopped.
+# With post_strict: true, a failure keeps the old process alive — the new
+# binary is never started. This makes it a true validation gate.
+#
+# The hook lifecycle is symmetric:
+#   pre_strict:  failure aborts the build   → old process stays alive
+#   post_strict: failure aborts the swap    → old process stays alive
+#
+# Without strict, failures are logged but do not block the swap.
+#
+# NOTE: post commands run with `path` as the working directory. All paths
+# below are relative to the project root (path: .).
+
+version: 1
+
+services:
+  # ── Dry-run / --check flag ────────────────────────────────────────────────
+  # Many servers support a --check flag that validates config and exits 0
+  # without binding any ports. Fastest gate — no network involved.
+  api:
+    path: .
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    post: ./tmp/api --check
+    post_strict: true
+    env:
+      PORT: "8080"
+
+  # ── HTTP readiness probe ──────────────────────────────────────────────────
+  # Start the new binary on an alternate port and check its health endpoint
+  # before the swap. The live process keeps serving on :8080 while the probe
+  # runs — no downtime for the check itself.
+  api-http-probe:
+    path: .
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    post: "sh -c 'PORT=18080 ./tmp/api & PID=$!; for i in 1 2 3 4 5; do sleep 1; curl -sf http://localhost:18080/healthz && break; done; STATUS=$?; kill $PID 2>/dev/null; exit $STATUS'"
+    post_strict: true
+    env:
+      PORT: "8080"
+
+  # ── Integration test ─────────────────────────────────────────────────────
+  # Run a focused test suite after the build. Only swap if the critical-path
+  # tests pass. Use post_strict: false if flakiness is a concern.
+  api-tested:
+    path: .
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    post: go test ./internal/smoke/... -run TestCriticalPath -count=1
+    post_strict: true

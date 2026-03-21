@@ -45,12 +45,14 @@ type ServiceConfig struct {
 	// The old process is kept alive (same semantics as a build failure).
 	PreStrict bool `yaml:"pre_strict"`
 
-	// Post is a command run after each successful restart. Failure is logged
-	// but does not affect the running process.
+	// Post is a command run after a successful build but before the process is
+	// swapped. On success (or non-strict failure) the old process is stopped
+	// and the new binary is started. On failure with post_strict: true the old
+	// process is kept alive — same semantics as pre_strict for the build step.
 	Post string `yaml:"post"`
 
-	// PostStrict makes a Post command failure log a hard error.
-	// The newly started process is NOT killed — it is already running.
+	// PostStrict makes a Post failure abort the swap entirely.
+	// The old process stays alive, identical to a build failure.
 	PostStrict bool `yaml:"post_strict"`
 
 	// KillTimeout is how long Pulse waits for the process to exit after SIGTERM
