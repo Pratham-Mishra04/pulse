@@ -2,26 +2,51 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/Pratham-Mishra04/pulse)](https://goreportcard.com/report/github.com/Pratham-Mishra04/pulse)
 
-**Live reload for any project. Your server stays alive when a build fails.**
+**Live reload that doesn't kill your server on build errors.**
 
-Pulse watches your source files, rebuilds on change, and restarts your process — but unlike other live-reload tools, it **keeps the old process running** when a build fails. You always have a working server, even mid-refactor.
+Fix your code. Your server stays up.
 
 ![Pulse banner](media/banner.png)
 
 ---
 
+## What makes Pulse different
+
+- Your server **stays alive** when builds fail — always a working API, even mid-refactor
+- Works out of the box in Docker — no polling config needed
+- Automatically watches `go.work` dependencies across monorepos
+- Works with **any language or toolchain** — not just Go
+- Optional **zero-downtime restarts** for HTTP services with slow startup times
+
+---
+
 ## Why Pulse
 
-Most live-reload tools kill your server the moment a build fails. That means during a refactor, your API goes down — every compile error takes your server with it.
+Most live-reload tools kill your server as soon as a build fails. That means your API goes down, your frontend breaks, and your dev loop gets interrupted — every time you have a compile error.
 
-Pulse takes the opposite approach: if the new build fails, the old binary keeps running. Your API stays up. You fix the error, save, and the reload happens cleanly.
+Pulse does the opposite.
 
-**Other differences from Air:**
+If a build fails, the old process keeps running. You fix the error, save, and continue — no downtime, no disruption.
 
-- Auto container detection — polling is auto-detected inside Docker/Kubernetes
-- Native Go workspace (`go.work`) support — external shared modules trigger rebuilds automatically
+**Coming from Air?** You'll notice:
 
-If you are migrating from Air, you can simply use `pulse migrate` to migrate your config to Pulse.
+- no dead server on build errors
+- no manual Docker polling config
+- better defaults out of the box
+
+---
+
+## When should you use Pulse?
+
+Pulse is built for:
+
+- Backend APIs you restart frequently during development
+- Services with slow startup times (DB connections, cache warmup, model loading)
+- Monorepos using `go.work` with shared modules
+- Docker-based development setups
+- Multi-service local environments
+
+If your dev loop is `edit → build → restart`, Pulse makes it faster and less frustrating.
 
 ---
 
@@ -56,6 +81,70 @@ pulse
 
 ---
 
+## Not just for Go
+
+Pulse works with any language or toolchain. The `build` and `run` fields are plain shell commands — there is nothing Go-specific about the core watch → build → restart loop.
+
+No build step? No problem — omit `build` and Pulse restarts your process directly on file changes.
+
+**Node.js / TypeScript**
+
+```yaml
+version: 1
+services:
+  server:
+    run: node src/index.js
+    watch:
+      - .js
+      - .json
+```
+
+```yaml
+version: 1
+services:
+  app:
+    build: npx tsc --noEmit
+    run: node dist/index.js
+    watch:
+      - .ts
+```
+
+**Python**
+
+```yaml
+version: 1
+services:
+  api:
+    run: python app.py
+    watch:
+      - .py
+```
+
+**Fullstack (Go backend + frontend asset pipeline)**
+
+```yaml
+version: 1
+services:
+  api:
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    watch: [.go, .templ, go.mod]
+
+  css:
+    run: npx tailwindcss -i ./assets/app.css -o ./static/app.css --watch
+    watch: [.css, .html, .templ]
+    no_stdin: true
+
+  js:
+    run: npx esbuild src/main.ts --bundle --outfile=static/app.js --watch
+    watch: [.ts, .tsx]
+    no_stdin: true
+```
+
+The keep-alive behaviour applies equally to all services — if the CSS watcher crashes, the Go API keeps running.
+
+---
+
 ## How It Works
 
 On startup, Pulse:
@@ -71,7 +160,7 @@ When a watched file changes:
 3. **If build succeeds** — old process is stopped, new binary is started
 4. **If build fails** — error is printed, old process is kept alive
 
-Two Ctrl+C presses are needed to exit: the first sends SIGTERM to your service gracefully, the second force-quits.
+Press Ctrl+C once to gracefully stop your service. Press again to force exit.
 
 ---
 
@@ -145,36 +234,36 @@ services:
       addr: ":8080" # Pulse owns this port; process runs on a dynamic internal port
     healthcheck:
       path: /health # endpoint polled on the internal port
-      interval: 1s  # poll cadence (default: 1s)
-      timeout: 60s  # total budget (default: 60s)
-      threshold: 1  # consecutive 200s required (default: 1)
+      interval: 1s # poll cadence (default: 1s)
+      timeout: 60s # total budget (default: 60s)
+      threshold: 1 # consecutive 200s required (default: 1)
 ```
 
 ### Field Reference
 
-| Field           | Default                 | Description                                                                       |
-| --------------- | ----------------------- | --------------------------------------------------------------------------------- |
-| `build`         | `""`                    | Shell command to compile the service (optional — omit for plain-process services) |
-| `run`           | required                | Command to start the process                                                      |
-| `path`          | `.`                     | Working directory for the build command                                           |
-| `watch`         | `[.go, go.mod, go.sum]` | Extensions or filenames that trigger a rebuild                                    |
-| `ignore`        | `[]`                    | Glob patterns excluded from watching (base filename)                              |
-| `env`           | `{}`                    | Extra environment variables injected into the process                             |
-| `pre`           | `""`                    | Command run before each build                                                     |
-| `pre_strict`    | `false`                 | Abort build if `pre` fails                                                        |
-| `post`          | `""`                    | Command run after each successful restart                                         |
-| `post_strict`   | `false`                 | Log hard error if `post` fails                                                    |
-| `debounce`      | `300ms`                 | Quiet period after last file event before building                                |
-| `kill_timeout`  | `5s`                    | Grace period between SIGTERM and SIGKILL                                          |
-| `polling`       | `"auto"`                | Polling strategy — see [Containers](#containers)                                  |
-| `poll_interval` | `500ms`                 | Tick rate when polling is active                                                  |
-| `no_stdin`      | `false`                 | Disable stdin forwarding to child process                                         |
-| `no_workspace`  | `false`                 | Disable automatic go.work detection                                               |
-| `proxy.addr`    | `""`                    | Public address Pulse binds as a reverse proxy — enables zero-downtime restarts    |
-| `healthcheck.path` | `""`                 | HTTP endpoint polled for readiness (required when `proxy` is set)                 |
-| `healthcheck.interval` | `1s`             | How often to poll the health endpoint                                             |
-| `healthcheck.timeout`  | `60s`            | Total budget before the health check is considered failed                         |
-| `healthcheck.threshold` | `1`             | Consecutive 200s required before promoting the new process                        |
+| Field                   | Default                 | Description                                                                       |
+| ----------------------- | ----------------------- | --------------------------------------------------------------------------------- |
+| `build`                 | `""`                    | Shell command to compile the service (optional — omit for plain-process services) |
+| `run`                   | required                | Command to start the process                                                      |
+| `path`                  | `.`                     | Working directory for the build command                                           |
+| `watch`                 | `[.go, go.mod, go.sum]` | Extensions or filenames that trigger a rebuild                                    |
+| `ignore`                | `[]`                    | Glob patterns excluded from watching (base filename)                              |
+| `env`                   | `{}`                    | Extra environment variables injected into the process                             |
+| `pre`                   | `""`                    | Command run before each build                                                     |
+| `pre_strict`            | `false`                 | Abort build if `pre` fails                                                        |
+| `post`                  | `""`                    | Command run after each successful restart                                         |
+| `post_strict`           | `false`                 | Log hard error if `post` fails                                                    |
+| `debounce`              | `300ms`                 | Quiet period after last file event before building                                |
+| `kill_timeout`          | `5s`                    | Grace period between SIGTERM and SIGKILL                                          |
+| `polling`               | `"auto"`                | Polling strategy — see [Containers](#containers)                                  |
+| `poll_interval`         | `500ms`                 | Tick rate when polling is active                                                  |
+| `no_stdin`              | `false`                 | Disable stdin forwarding to child process                                         |
+| `no_workspace`          | `false`                 | Disable automatic go.work detection                                               |
+| `proxy.addr`            | `""`                    | Public address Pulse binds as a reverse proxy — enables zero-downtime restarts    |
+| `healthcheck.path`      | `""`                    | HTTP endpoint polled for readiness (required when `proxy` is set)                 |
+| `healthcheck.interval`  | `1s`                    | How often to poll the health endpoint                                             |
+| `healthcheck.timeout`   | `60s`                   | Total budget before the health check is considered failed                         |
+| `healthcheck.threshold` | `1`                     | Consecutive 200s required before promoting the new process                        |
 
 ### Always-Ignored
 
@@ -189,6 +278,82 @@ These are hardcoded and cannot be overridden:
 | `testdata/`     | Go test fixture convention |
 | `*_gen.go`      | Generated files            |
 | `*.pb.go`       | Protobuf generated files   |
+
+---
+
+## Zero-Downtime Restarts (Proxy Mode)
+
+Services with slow startup times — database connections, model loading, cache warming — have a gap between when the old process stops and the new one is ready. For a server that takes 20 seconds to initialize, every rebuild means 20 seconds of downtime.
+
+Proxy mode eliminates that gap.
+
+```
+Old process serves traffic → new process warms up → switch when ready.
+```
+
+When enabled, Pulse owns the public port and acts as a reverse proxy. On every rebuild:
+
+1. The new binary starts on a dynamic internal port — the old process keeps serving live traffic
+2. Pulse polls your health endpoint until it returns HTTP 200
+3. Once healthy, Pulse atomically switches the proxy to the new process — zero gap
+4. The old process receives SIGTERM and drains in-flight requests for up to `kill_timeout`
+
+```yaml
+version: 1
+
+services:
+  api:
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    proxy:
+      addr: ":8080" # Pulse owns this port
+    healthcheck:
+      path: /health # polled on the internal port
+      interval: 1s # how often to poll (default: 1s)
+      timeout: 60s # total budget before giving up (default: 60s)
+      threshold: 1 # consecutive 200s required (default: 1)
+    kill_timeout: 10s # drain window for the old process
+```
+
+Pulse injects `PORT` into the process environment with the dynamic internal port. Your app just reads `os.Getenv("PORT")` — no other changes needed. Any `PORT` value in `env:` is ignored when proxy is active.
+
+> **`proxy` and `healthcheck` must be set together.** One without the other is a hard error at startup.
+
+**What happens if the health check fails?** The new process is killed and the old one keeps serving. A bad deploy never reaches live traffic.
+
+**What happens during the very first startup?** The proxy returns `503` to clients until the initial health check passes. On all subsequent restarts, the old process continues serving throughout the warmup — clients see no errors.
+
+---
+
+## Multi-Service
+
+Run multiple services from a single `pulse.yaml`:
+
+```yaml
+version: 1
+
+services:
+  api:
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    env:
+      PORT: "8080"
+
+  worker:
+    build: go build -o ./tmp/worker ./cmd/worker
+    run: ./tmp/worker
+    env:
+      QUEUE_URL: amqp://localhost
+```
+
+Each service runs in its own goroutine. Log output is prefixed with the service name:
+
+```
+14:03:01 [api]    build  230ms ✓
+14:03:01 [worker] build  180ms ✓
+14:03:01 [api]    start  pid=48291
+14:03:01 [worker] start  pid=48292
+```
 
 ---
 
@@ -239,102 +404,6 @@ Print version and Go runtime information.
 | `--quiet`    | `-q`  | `false`      | Only show errors and restarts               |
 | `--verbose`  | `-v`  | `false`      | Show all file events including ignored ones |
 | `--no-color` |       | `false`      | Disable ANSI color output                   |
-
----
-
-## Multi-Service
-
-Run multiple services from a single `pulse.yaml`:
-
-```yaml
-version: 1
-
-services:
-  api:
-    build: go build -o ./tmp/api ./cmd/api
-    run: ./tmp/api
-    env:
-      PORT: "8080"
-
-  worker:
-    build: go build -o ./tmp/worker ./cmd/worker
-    run: ./tmp/worker
-    env:
-      QUEUE_URL: amqp://localhost
-```
-
-Each service runs in its own goroutine. Log output is prefixed with the service name:
-
-```
-21:03:01 [api]    build  230ms ✓
-21:03:01 [worker] build  180ms ✓
-21:03:01 [api]    start  pid=48291
-21:03:01 [worker] start  pid=48292
-```
-
----
-
-## Not Just for Go
-
-Pulse works with any language or toolchain. The `build` and `run` fields are plain shell commands — there is nothing Go-specific about the core watch → build → restart loop.
-
-`build` is optional. If you omit it, Pulse skips the compile step and restarts the process directly on file changes. This is useful for interpreted languages, bundlers, or any long-running process you want to auto-restart.
-
-**Node.js / TypeScript**
-
-```yaml
-version: 1
-services:
-  server:
-    run: node src/index.js
-    watch:
-      - .js
-      - .json
-```
-
-```yaml
-version: 1
-services:
-  app:
-    build: npx tsc --noEmit
-    run: node dist/index.js
-    watch:
-      - .ts
-```
-
-**Python**
-
-```yaml
-version: 1
-services:
-  api:
-    run: python app.py
-    watch:
-      - .py
-```
-
-**Fullstack (Go backend + frontend asset pipeline)**
-
-```yaml
-version: 1
-services:
-  api:
-    build: go build -o ./tmp/api ./cmd/api
-    run: ./tmp/api
-    watch: [.go, .templ, go.mod]
-
-  css:
-    run: npx tailwindcss -i ./assets/app.css -o ./static/app.css --watch
-    watch: [.css, .html, .templ]
-    no_stdin: true
-
-  js:
-    run: npx esbuild src/main.ts --bundle --outfile=static/app.js --watch
-    watch: [.ts, .tsx]
-    no_stdin: true
-```
-
-The keep-alive behaviour applies equally to all services — if the CSS watcher crashes, the Go API keeps running.
 
 ---
 
@@ -393,44 +462,6 @@ services:
 
 ---
 
-## Zero-Downtime Restarts (Proxy Mode)
-
-API servers with slow startup times (database connections, model loading, cache warming) have a gap between when the old process stops and the new one is ready. Proxy mode eliminates that gap.
-
-When enabled, Pulse owns the public port and acts as a reverse proxy. On every rebuild:
-
-1. The new binary starts on a dynamic internal port — the old process keeps serving live traffic
-2. Pulse polls your health endpoint until it returns HTTP 200
-3. Once healthy, Pulse atomically switches the proxy to the new process — zero gap
-4. The old process receives SIGTERM and drains in-flight requests for up to `kill_timeout`
-
-```yaml
-version: 1
-
-services:
-  api:
-    build: go build -o ./tmp/api ./cmd/api
-    run: ./tmp/api
-    proxy:
-      addr: ":8080"        # Pulse owns this port
-    healthcheck:
-      path: /health        # polled on the internal port
-      interval: 1s         # how often to poll (default: 1s)
-      timeout: 60s         # total budget before giving up (default: 60s)
-      threshold: 1         # consecutive 200s required (default: 1)
-    kill_timeout: 10s      # drain window for the old process
-```
-
-Pulse injects `PORT` into the process environment with the dynamic internal port. Your app just reads `os.Getenv("PORT")` — no other changes needed. Any `PORT` value in `env:` is ignored when proxy is active.
-
-> **`proxy` and `healthcheck` must be set together.** One without the other is a hard error at startup.
-
-**What happens if the health check fails?** The new process is killed and the old one keeps serving. A bad deploy never reaches live traffic.
-
-**What happens during warmup?** The proxy returns `503` to clients until the first health check passes. On subsequent restarts, the old process continues serving during the entire warmup — clients see no errors.
-
----
-
 ## Hooks
 
 ### Pre-build hook
@@ -449,7 +480,7 @@ If `pre` fails, the failure is logged but the build still runs. Set `pre_strict:
 
 ### Post-restart hook
 
-Runs after each successful restart. Useful for notifications or health checks.
+Runs after each successful restart. Useful for notifications or smoke tests.
 
 ```yaml
 services:
@@ -498,7 +529,7 @@ ignored   build.stop_on_error    (Pulse always keeps the old process alive on bu
 ignored   [proxy]                (browser reload proxy is not supported in Pulse)
 ```
 
-**Key differences from Air to be aware of:**
+**Key differences from Air:**
 
 | Air                    | Pulse           | Note                                                      |
 | ---------------------- | --------------- | --------------------------------------------------------- |
@@ -553,7 +584,7 @@ make snapshot  # cross-compile for Linux, macOS (arm64/amd64)
 | -------------------- | ------------------------ |
 | macOS (arm64, amd64) | Supported                |
 | Linux (amd64, arm64) | Supported                |
-| Windows (amd64)      | Coming soon              |
+| Windows (amd64)      | Coming Soon              |
 | Inside Docker        | Supported (auto-polling) |
 | Kubernetes pods      | Supported (auto-polling) |
 

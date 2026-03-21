@@ -105,6 +105,17 @@ func externalWorkspaceDirs(goWorkPath, projectRoot string) ([]string, error) {
 			continue
 		}
 
+		// Skip entries that are ancestors of the project root. Walking them
+		// recursively would re-register every directory under the project root
+		// a second time, producing duplicate file-change events.
+		relReverse, err := filepath.Rel(abs, projectAbs)
+		if err != nil {
+			continue
+		}
+		if !strings.HasPrefix(relReverse, "..") {
+			continue
+		}
+
 		extra = append(extra, abs)
 	}
 
