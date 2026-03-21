@@ -138,6 +138,15 @@ services:
     # Misc
     no_stdin: false # disable stdin forwarding (useful in CI)
     no_workspace: false # disable go.work auto-detection
+
+    # Zero-downtime restarts (optional — proxy and healthcheck must be set together)
+    proxy:
+      addr: ":8080" # Pulse owns this port; process runs on a dynamic internal port
+    healthcheck:
+      path: /health # endpoint polled on the internal port
+      interval: 1s  # poll cadence (default: 1s)
+      timeout: 60s  # total budget (default: 60s)
+      threshold: 1  # consecutive 200s required (default: 1)
 ```
 
 ### Field Reference
@@ -160,6 +169,11 @@ services:
 | `poll_interval` | `500ms`                 | Tick rate when polling is active                                                  |
 | `no_stdin`      | `false`                 | Disable stdin forwarding to child process                                         |
 | `no_workspace`  | `false`                 | Disable automatic go.work detection                                               |
+| `proxy.addr`    | `""`                    | Public address Pulse binds as a reverse proxy — enables zero-downtime restarts    |
+| `healthcheck.path` | `""`                 | HTTP endpoint polled for readiness (required when `proxy` is set)                 |
+| `healthcheck.interval` | `1s`             | How often to poll the health endpoint                                             |
+| `healthcheck.timeout`  | `60s`            | Total budget before the health check is considered failed                         |
+| `healthcheck.threshold` | `1`             | Consecutive 200s required before promoting the new process                        |
 
 ### Always-Ignored
 
@@ -378,6 +392,44 @@ services:
 
 ---
 
+## Zero-Downtime Restarts (Proxy Mode)
+
+API servers with slow startup times (database connections, model loading, cache warming) have a gap between when the old process stops and the new one is ready. Proxy mode eliminates that gap.
+
+When enabled, Pulse owns the public port and acts as a reverse proxy. On every rebuild:
+
+1. The new binary starts on a dynamic internal port — the old process keeps serving live traffic
+2. Pulse polls your health endpoint until it returns HTTP 200
+3. Once healthy, Pulse atomically switches the proxy to the new process — zero gap
+4. The old process receives SIGTERM and drains in-flight requests for up to `kill_timeout`
+
+```yaml
+version: 1
+
+services:
+  api:
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+    proxy:
+      addr: ":8080"        # Pulse owns this port
+    healthcheck:
+      path: /health        # polled on the internal port
+      interval: 1s         # how often to poll (default: 1s)
+      timeout: 60s         # total budget before giving up (default: 60s)
+      threshold: 1         # consecutive 200s required (default: 1)
+    kill_timeout: 10s      # drain window for the old process
+```
+
+Pulse injects `PORT` into the process environment with the dynamic internal port. Your app just reads `os.Getenv("PORT")` — no other changes needed. Any `PORT` value in `env:` is ignored when proxy is active.
+
+> **`proxy` and `healthcheck` must be set together.** One without the other is a hard error at startup.
+
+**What happens if the health check fails?** The new process is killed and the old one keeps serving. A bad deploy never reaches live traffic.
+
+**What happens during warmup?** The proxy returns `503` to clients until the first health check passes. On subsequent restarts, the old process continues serving during the entire warmup — clients see no errors.
+
+---
+
 ## Hooks
 
 ### Pre-build hook
@@ -472,6 +524,7 @@ The `examples/` directory contains ready-to-use configs:
 | `docker.yaml`        | Docker bind-mount with forced polling             |
 | `env-vars.yaml`      | Environment variable injection                    |
 | `hooks.yaml`         | Pre/post hook patterns                            |
+| `proxy.yaml`         | Zero-downtime restarts with proxy + healthcheck   |
 | `custom-watch.yaml`  | Watching `.tmpl`, `.html`, and other non-Go files |
 | `ci.yaml`            | CI environment (no stdin, no color)               |
 | `tuning.yaml`        | Debounce and kill-timeout tuning                  |

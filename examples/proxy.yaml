@@ -1,0 +1,44 @@
+# examples/proxy.yaml
+#
+# Zero-downtime restarts with the built-in reverse proxy.
+#
+# How it works:
+#   1. Pulse binds the public address (proxy.addr) and owns it for the
+#      entire session — your clients always connect here.
+#   2. The actual process runs on a dynamic internal port chosen by Pulse.
+#      Pulse injects PORT into the process environment automatically, so
+#      your app just reads os.Getenv("PORT") as usual.
+#   3. On every rebuild:
+#        a. The new binary starts on a new internal port.
+#           The old process continues serving live traffic.
+#        b. Pulse polls healthcheck.path until it returns HTTP 200.
+#        c. Once healthy, the proxy atomically switches to the new process.
+#           There is no window where the public port is down.
+#        d. The old process receives SIGTERM and drains in-flight requests
+#           for up to kill_timeout before being force-killed.
+#   4. If the health check times out, the new process is killed and the
+#      old one keeps serving — no bad deploy reaches live traffic.
+#
+# Requirements:
+#   - proxy and healthcheck must be set together; one without the other
+#     is a hard error at startup.
+#   - Any PORT value in env: is ignored — Pulse controls it in proxy mode.
+
+version: 1
+
+services:
+  api:
+    path: .
+    build: go build -o ./tmp/api ./cmd/api
+    run: ./tmp/api
+
+    proxy:
+      addr: ":8080"       # public address Pulse listens on
+
+    healthcheck:
+      path: /health       # endpoint Pulse polls on the internal port
+      interval: 1s        # how often to poll (default: 1s)
+      timeout: 60s        # total budget before giving up (default: 60s)
+      threshold: 1        # consecutive 200s required (default: 1)
+
+    kill_timeout: 10s     # how long to wait for the old process to drain
