@@ -54,6 +54,7 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(migrateCmd)
+	rootCmd.AddCommand(helpCmd)
 
 	// Suppress the default cobra completion command — not needed.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true

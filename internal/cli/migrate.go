@@ -16,7 +16,7 @@ import (
 
 var migrateCmd = &cobra.Command{
 	Use:   "migrate <path>",
-	Short: "Migrate an Air config (.air.toml) to pulse.yaml",
+	Short: "Migrate an Air .air.toml to pulse.yaml",
 	Long: `pulse migrate reads an existing .air.toml and generates a pulse.yaml.
 
 Every mapped field is logged. Every dropped field is logged with a reason.
