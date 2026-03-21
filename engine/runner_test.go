@@ -12,7 +12,7 @@ func TestBuildEnv_MergesExtraVars(t *testing.T) {
 		"PORT":   "8080",
 		"DB_URL": "postgres://localhost/dev",
 	}
-	env := buildEnv(extra)
+	env := buildEnv(extra, 0)
 
 	hasPort := false
 	hasDB := false
@@ -34,7 +34,7 @@ func TestBuildEnv_MergesExtraVars(t *testing.T) {
 
 func TestBuildEnv_NilExtraReturnsParent(t *testing.T) {
 	parent := os.Environ()
-	result := buildEnv(nil)
+	result := buildEnv(nil, 0)
 	if len(result) != len(parent) {
 		t.Errorf("buildEnv(nil) len = %d, want %d (parent env)", len(result), len(parent))
 	}
@@ -42,7 +42,7 @@ func TestBuildEnv_NilExtraReturnsParent(t *testing.T) {
 
 func TestBuildEnv_EmptyExtraReturnsParent(t *testing.T) {
 	parent := os.Environ()
-	result := buildEnv(map[string]string{})
+	result := buildEnv(map[string]string{}, 0)
 	if len(result) != len(parent) {
 		t.Errorf("buildEnv({}) len = %d, want %d (parent env)", len(result), len(parent))
 	}

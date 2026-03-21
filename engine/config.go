@@ -88,6 +88,18 @@ type ServiceConfig struct {
 	// changes to shared workspace modules trigger a rebuild.
 	// Set to true to opt out of this behaviour.
 	NoWorkspace bool `yaml:"no_workspace"`
+
+	// Proxy enables zero-downtime restarts. Pulse binds the public address
+	// and reverse-proxies to the process on a dynamic internal port.
+	// When set, HealthCheck must also be configured.
+	// Pulse injects PORT into the process environment with the internal port —
+	// any PORT value in env: is ignored when proxy is active.
+	Proxy *ProxyConfig `yaml:"proxy,omitempty"`
+
+	// HealthCheck configures how Pulse polls the new process for readiness
+	// before atomically swapping it behind the proxy.
+	// Required when proxy is set.
+	HealthCheck *HealthCheckConfig `yaml:"healthcheck,omitempty"`
 }
 
 // Config is the top-level structure of pulse.yaml.
@@ -103,18 +115,69 @@ type Config struct {
 
 // Default values applied when the corresponding field is zero / unset.
 const (
-	DefaultDebounce    = 300 * time.Millisecond
-	DefaultKillTimeout = 5 * time.Second
+	DefaultDebounce             = 300 * time.Millisecond
+	DefaultKillTimeout          = 5 * time.Second
+	DefaultHealthCheckInterval  = 1 * time.Second
+	DefaultHealthCheckTimeout   = 60 * time.Second
+	DefaultHealthCheckThreshold = 1
+
+	DefaultProxyReadTimeout  = 30 * time.Second
+	DefaultProxyWriteTimeout = 60 * time.Second
+	DefaultProxyIdleTimeout  = 120 * time.Second
 )
+
+// ProxyConfig enables zero-downtime restarts by having Pulse own the public
+// port and reverse-proxy to the actual process on a dynamic internal port.
+// When set, healthcheck must also be configured.
+type ProxyConfig struct {
+	// Addr is the public address Pulse listens on, e.g. ":8080".
+	Addr string `yaml:"addr"`
+
+	// ReadTimeout is the maximum duration for reading the entire request.
+	// Defaults to 30s.
+	ReadTimeout time.Duration `yaml:"read_timeout"`
+
+	// WriteTimeout is the maximum duration before timing out writes of the
+	// response. Defaults to 60s.
+	WriteTimeout time.Duration `yaml:"write_timeout"`
+
+	// IdleTimeout is the maximum amount of time to wait for the next request
+	// when keep-alives are enabled. Defaults to 120s.
+	IdleTimeout time.Duration `yaml:"idle_timeout"`
+}
+
+// HealthCheckConfig controls how Pulse polls the new process before promoting
+// it behind the proxy. Only meaningful when proxy is set.
+type HealthCheckConfig struct {
+	// Path is the HTTP endpoint to poll, e.g. "/health". Required.
+	Path string `yaml:"path"`
+
+	// Interval is how often to poll. Defaults to 1s.
+	Interval time.Duration `yaml:"interval"`
+
+	// Timeout is the total budget for the health check. If the process does
+	// not become healthy within this window, the swap is aborted and the old
+	// process is kept alive. Defaults to 60s.
+	Timeout time.Duration `yaml:"timeout"`
+
+	// Threshold is the number of consecutive 200 responses required before
+	// the process is promoted. Defaults to 1.
+	Threshold int `yaml:"threshold"`
+}
 
 // expandEnv replaces ${VAR} and $VAR references in command and path fields
 // with their values from the environment. This lets pulse.yaml stay free of
-// hardcoded values — callers can export HOST=localhost PORT=8080 etc. before
-// running pulse and the substitution happens at load time.
+// hardcoded values — callers can export HOST=localhost etc. before running
+// pulse and the substitution happens at load time.
+//
+// NOTE: Run is intentionally excluded. The run command is executed inside a
+// child shell at runtime, so env vars like $PORT are expanded there — after
+// Pulse has injected any dynamic values (e.g. the internal proxy port) into
+// the child's environment. Expanding Run at load time would bake in the
+// parent's PORT value and prevent proxy port injection from taking effect.
 func (s *ServiceConfig) expandEnv() {
 	s.Path = os.ExpandEnv(s.Path)
 	s.Build = os.ExpandEnv(s.Build)
-	s.Run = os.ExpandEnv(s.Run)
 	s.Pre = os.ExpandEnv(s.Pre)
 	s.Post = os.ExpandEnv(s.Post)
 }
@@ -137,6 +200,28 @@ func (s *ServiceConfig) applyDefaults() {
 	}
 	if s.PollInterval == 0 {
 		s.PollInterval = defaultPollInterval
+	}
+	if s.Proxy != nil {
+		if s.Proxy.ReadTimeout == 0 {
+			s.Proxy.ReadTimeout = DefaultProxyReadTimeout
+		}
+		if s.Proxy.WriteTimeout == 0 {
+			s.Proxy.WriteTimeout = DefaultProxyWriteTimeout
+		}
+		if s.Proxy.IdleTimeout == 0 {
+			s.Proxy.IdleTimeout = DefaultProxyIdleTimeout
+		}
+	}
+	if s.HealthCheck != nil {
+		if s.HealthCheck.Interval == 0 {
+			s.HealthCheck.Interval = DefaultHealthCheckInterval
+		}
+		if s.HealthCheck.Timeout == 0 {
+			s.HealthCheck.Timeout = DefaultHealthCheckTimeout
+		}
+		if s.HealthCheck.Threshold == 0 {
+			s.HealthCheck.Threshold = DefaultHealthCheckThreshold
+		}
 	}
 }
 
@@ -171,6 +256,32 @@ func LoadConfig(path string) (Config, error) {
 		svc.applyDefaults()
 		if svc.Run == "" {
 			return Config{}, fmt.Errorf("service %q: run command is required", name)
+		}
+		if svc.Proxy != nil {
+			if svc.Proxy.Addr == "" {
+				return Config{}, fmt.Errorf("service %q: proxy.addr is required", name)
+			}
+			if svc.HealthCheck == nil {
+				return Config{}, fmt.Errorf("service %q: healthcheck is required when proxy is set", name)
+			}
+			if svc.HealthCheck.Path == "" {
+				return Config{}, fmt.Errorf("service %q: healthcheck.path is required", name)
+			}
+			if svc.Proxy.ReadTimeout < 0 || svc.Proxy.WriteTimeout < 0 || svc.Proxy.IdleTimeout < 0 {
+				return Config{}, fmt.Errorf("service %q: proxy timeouts must be >= 0", name)
+			}
+			if svc.HealthCheck.Interval < 0 || svc.HealthCheck.Timeout < 0 {
+				return Config{}, fmt.Errorf("service %q: healthcheck interval and timeout must be >= 0", name)
+			}
+			if svc.HealthCheck.Threshold < 0 {
+				return Config{}, fmt.Errorf("service %q: healthcheck.threshold must be >= 0", name)
+			}
+			if _, hasPort := svc.Env["PORT"]; hasPort {
+				fmt.Printf("warning: service %q: PORT in env is ignored when proxy is set — Pulse injects PORT automatically\n", name)
+			}
+		}
+		if svc.HealthCheck != nil && svc.Proxy == nil {
+			fmt.Printf("warning: service %q: healthcheck is ignored when proxy is not set\n", name)
 		}
 		cfg.Services[name] = svc
 	}

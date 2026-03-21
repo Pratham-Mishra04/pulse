@@ -181,7 +181,7 @@ func TestEngine_PostStrict_LeavesOldProcess(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("initial build failed: %v\n%s", result.Err, result.Output)
 	}
-	if err := r.Start(result); err != nil {
+	if err := r.Start(result, 0); err != nil {
 		t.Fatalf("failed to start initial process: %v", err)
 	}
 	t.Cleanup(func() { _ = r.Stop() })
