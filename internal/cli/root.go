@@ -48,7 +48,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&flagQuiet, "quiet", "q", false, "only show errors and restarts")
 	rootCmd.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "show all file events including ignored ones")
 	rootCmd.PersistentFlags().BoolVar(&flagNoColor, "no-color", false, "disable ANSI color output")
-	rootCmd.PersistentFlags().StringVar(&flagConfig, "config", "pulse.yaml", "path to pulse.yaml")
+	rootCmd.PersistentFlags().StringVarP(&flagConfig, "config", "c", "pulse.yaml", "path to config file")
 
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(runCmd)

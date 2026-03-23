@@ -400,7 +400,7 @@ Print version and Go runtime information.
 
 | Flag         | Short | Default      | Description                                 |
 | ------------ | ----- | ------------ | ------------------------------------------- |
-| `--config`   |       | `pulse.yaml` | Path to config file                         |
+| `--config`   | `-c`  | `pulse.yaml` | Path to config file                         |
 | `--quiet`    | `-q`  | `false`      | Only show errors and restarts               |
 | `--verbose`  | `-v`  | `false`      | Show all file events including ignored ones |
 | `--no-color` |       | `false`      | Disable ANSI color output                   |
