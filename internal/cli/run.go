@@ -27,7 +27,7 @@ func runPulse(cmd *cobra.Command, args []string) error {
 
 	// Hard error if pulse.yaml doesn't exist — we need the entrypoint.
 	if _, err := os.Stat(flagConfig); os.IsNotExist(err) {
-		return fmt.Errorf("no pulse.yaml found\n         run `pulse init <path>` to get started")
+		return fmt.Errorf("config file not found: %s\n         run `pulse init <path>` to get started", flagConfig)
 	}
 
 	cfg, err := engine.LoadConfig(flagConfig)
