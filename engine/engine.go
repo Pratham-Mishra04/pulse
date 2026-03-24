@@ -322,6 +322,7 @@ func (e *Engine) proxyRestart(ctx context.Context, result BuildResult) {
 
 		// Stop the old process in the background so we don't block the swap.
 		go func() {
+			e.log.Info(fmt.Sprintf("shutting down old %s process (pid %d)", e.name, oldPid))
 			if err := e.runner.StopProcess(oldCmd, oldPid); err != nil {
 				e.log.Error("failed to stop old process: " + err.Error())
 			}
