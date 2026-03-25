@@ -180,6 +180,12 @@ func (s *ServiceConfig) expandEnv() {
 	s.Build = os.ExpandEnv(s.Build)
 	s.Pre = os.ExpandEnv(s.Pre)
 	s.Post = os.ExpandEnv(s.Post)
+	if s.Proxy != nil {
+		s.Proxy.Addr = os.ExpandEnv(s.Proxy.Addr)
+	}
+	if s.HealthCheck != nil {
+		s.HealthCheck.Path = os.ExpandEnv(s.HealthCheck.Path)
+	}
 }
 
 // applyDefaults fills in zero-value fields with sensible defaults.
