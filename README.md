@@ -254,7 +254,7 @@ services:
 | `post`                  | `""`                    | Command run after each successful restart                                         |
 | `post_strict`           | `false`                 | Log hard error if `post` fails                                                    |
 | `debounce`              | `300ms`                 | Quiet period after last file event before building                                |
-| `kill_timeout`          | `5s`                    | Grace period between SIGTERM and SIGKILL                                          |
+| `kill_timeout`          | `5s`                    | Grace period between graceful signal and force-kill                               |
 | `polling`               | `"auto"`                | Polling strategy — see [Containers](#containers)                                  |
 | `poll_interval`         | `500ms`                 | Tick rate when polling is active                                                  |
 | `no_stdin`              | `false`                 | Disable stdin forwarding to child process                                         |
@@ -573,7 +573,7 @@ make e2e       # end-to-end tests (spawns real processes)
 make test-all  # unit + e2e
 make lint      # go vet
 make tidy      # go mod tidy + verify
-make snapshot  # cross-compile for Linux, macOS (arm64/amd64)
+make snapshot  # cross-compile for Linux, macOS (arm64/amd64), Windows
 ```
 
 ---
@@ -584,9 +584,16 @@ make snapshot  # cross-compile for Linux, macOS (arm64/amd64)
 | -------------------- | ------------------------ |
 | macOS (arm64, amd64) | Supported                |
 | Linux (amd64, arm64) | Supported                |
-| Windows (amd64)      | Coming Soon              |
+| Windows (amd64)      | Supported                |
 | Inside Docker        | Supported (auto-polling) |
 | Kubernetes pods      | Supported (auto-polling) |
+
+### Windows Notes
+
+- **Installation**: `go install github.com/Pratham-Mishra04/pulse@latest` works the same as on Unix. You can build Windows `.exe` artifacts locally with `make snapshot`.
+- **Graceful shutdown**: Pulse sends `CTRL_BREAK_EVENT` to the child process on shutdown — the Windows equivalent of SIGTERM. Child processes can intercept it via [`SetConsoleCtrlHandler`](https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler). If the signal is delivered but the child does not exit within `kill_timeout`, Pulse falls back to `taskkill /F /T`; if signal delivery itself fails (e.g. the process has a different console), Pulse force-kills immediately.
+- **Ctrl+C**: Works as expected — first press triggers a graceful shutdown, second press force-exits.
+- **Shell commands**: `build`, `run`, `pre`, and `post` values are passed to the OS as-is. Use `cmd /C <command>` if you need Windows shell builtins (e.g. `cmd /C del tmp\out.exe`).
 
 ---
 

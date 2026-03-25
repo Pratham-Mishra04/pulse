@@ -179,7 +179,14 @@ func (r *Runner) stopProcess(cmd *exec.Cmd, pid int) error {
 			_ = cmd.Wait()
 			return nil
 		}
-		return fmt.Errorf("failed to kill process: %w", err)
+		// Graceful kill failed (e.g. Windows console mismatch where
+		// GenerateConsoleCtrlEvent cannot reach the target) — fall back
+		// to force-killing the process tree immediately.
+		if err := r.killer.KillTree(pid); err != nil {
+			return fmt.Errorf("failed to kill process: %w", err)
+		}
+		_ = cmd.Wait()
+		return nil
 	}
 
 	// Wait for the process to exit in a goroutine so we can apply a timeout.
@@ -294,7 +301,7 @@ func (r *Runner) buildCmd(result BuildResult, portOverride int) (*exec.Cmd, io.W
 	cmd.Env = buildEnv(r.cfg.Env, portOverride)
 
 	// Put the child in its own process group so we can kill the entire tree.
-	// On Unix this sets Setpgid=true. On Windows this is a no-op (Tier 2).
+	// On Unix this sets Setpgid=true; on Windows it sets CREATE_NEW_PROCESS_GROUP.
 	platform.SetPgid(cmd)
 
 	var pipe io.WriteCloser
