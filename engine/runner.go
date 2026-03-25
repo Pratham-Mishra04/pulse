@@ -32,12 +32,14 @@ type Runner struct {
 	log    *log.Logger
 	killer platform.Killer // platform-specific kill implementation
 
-	// mu guards cmd, pid, pendingCmd, and pendingPid.
-	mu         sync.Mutex
-	cmd        *exec.Cmd
-	pid        int
-	pendingCmd *exec.Cmd
-	pendingPid int
+	// mu guards cmd, pid, pendingCmd, pendingPid, activeExited, and pendingExited.
+	mu            sync.Mutex
+	cmd           *exec.Cmd
+	pid           int
+	activeExited  chan struct{} // closed by Wait goroutine when active process exits
+	pendingCmd    *exec.Cmd
+	pendingPid    int
+	pendingExited chan struct{} // closed by Wait goroutine when pending process exits
 
 	// stdinPipe is the write end of the active child's stdin pipe.
 	// It is replaced on each restart while the forwardStdin goroutine is running.
@@ -99,8 +101,10 @@ func (r *Runner) PromotePending() {
 	r.mu.Lock()
 	r.cmd = r.pendingCmd
 	r.pid = r.pendingPid
+	r.activeExited = r.pendingExited
 	r.pendingCmd = nil
 	r.pendingPid = 0
+	r.pendingExited = nil
 
 	newPipe := r.pendingPipe
 	r.pendingPipe = nil
@@ -120,30 +124,40 @@ func (r *Runner) StopPending() error {
 	r.mu.Lock()
 	cmd := r.pendingCmd
 	pid := r.pendingPid
+	exited := r.pendingExited
 	r.pendingCmd = nil
 	r.pendingPid = 0
 	r.pendingPipe = nil
+	r.pendingExited = nil
 	r.mu.Unlock()
 
 	if cmd == nil || pid == 0 {
 		return nil
 	}
-	return r.stopProcess(cmd, pid)
+	return r.stopProcess(cmd, pid, exited)
 }
 
 // StopProcess stops an arbitrary cmd/pid pair using the same graceful shutdown
-// logic as Stop(). Used to stop the old active process after promotion.
+// logic as Stop(). exited is the channel closed by the process's Wait goroutine.
 // Intended to be called in a background goroutine so it does not block the swap.
-func (r *Runner) StopProcess(cmd *exec.Cmd, pid int) error {
-	return r.stopProcess(cmd, pid)
+func (r *Runner) StopProcess(cmd *exec.Cmd, pid int, exited <-chan struct{}) error {
+	return r.stopProcess(cmd, pid, exited)
 }
 
-// CurrentCmdPid returns the active cmd and pid under the mutex.
+// CaptureActive returns the active cmd, pid, and exited channel under the mutex.
 // Used by the engine to capture the old process before launching a new one.
-func (r *Runner) CurrentCmdPid() (*exec.Cmd, int) {
+func (r *Runner) CaptureActive() (*exec.Cmd, int, <-chan struct{}) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.cmd, r.pid
+	return r.cmd, r.pid, r.activeExited
+}
+
+// ActiveExited returns the channel that will be closed when the active process
+// exits. Used by the engine to detect unexpected process death in proxy mode.
+func (r *Runner) ActiveExited() <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.activeExited
 }
 
 // Stop sends SIGTERM to the process group and waits up to KillTimeout for
@@ -152,31 +166,35 @@ func (r *Runner) Stop() error {
 	r.mu.Lock()
 	cmd := r.cmd
 	pid := r.pid
+	exited := r.activeExited
+	// Clear active state before releasing the lock so that watchActiveProcess
+	// sees a zeroed pid as soon as the process exits and does not signal a
+	// false crash via processDied.
+	r.cmd = nil
+	r.pid = 0
+	r.activeExited = nil
 	r.mu.Unlock()
 
 	if cmd == nil || pid == 0 {
 		return nil
 	}
 
-	if err := r.stopProcess(cmd, pid); err != nil {
-		return err
-	}
-
-	r.mu.Lock()
-	r.cmd = nil
-	r.pid = 0
-	r.mu.Unlock()
-	return nil
+	return r.stopProcess(cmd, pid, exited)
 }
 
 // stopProcess is the shared implementation for gracefully stopping any
-// cmd/pid pair: SIGTERM → KillTimeout → SIGKILL.
-func (r *Runner) stopProcess(cmd *exec.Cmd, pid int) error {
+// pid: SIGTERM → KillTimeout → SIGKILL.
+// exited is the channel that the process's dedicated Wait goroutine closes
+// when the process exits — it must not be nil.
+func (r *Runner) stopProcess(_ *exec.Cmd, pid int, exited <-chan struct{}) error {
+	if exited == nil {
+		return fmt.Errorf("stopProcess: exited channel must not be nil")
+	}
 	// Graceful shutdown: SIGTERM to the entire process group.
 	if err := r.killer.Kill(pid); err != nil {
 		if strings.Contains(err.Error(), "no such process") || strings.Contains(err.Error(), "process already finished") {
-			// Process already exited on its own — reap it.
-			_ = cmd.Wait()
+			// Process already exited on its own — wait for the Wait goroutine.
+			<-exited
 			return nil
 		}
 		// Graceful kill failed (e.g. Windows console mismatch where
@@ -189,19 +207,15 @@ func (r *Runner) stopProcess(cmd *exec.Cmd, pid int) error {
 		return nil
 	}
 
-	// Wait for the process to exit in a goroutine so we can apply a timeout.
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-
 	select {
-	case <-done:
+	case <-exited:
 		// Process exited within the timeout — clean shutdown.
 	case <-time.After(r.cfg.KillTimeout):
 		// Timed out — escalate to SIGKILL on the entire process tree.
 		if err := r.killer.KillTree(pid); err != nil {
 			return fmt.Errorf("failed to kill process tree: %w", err)
 		}
-		<-done // wait for Wait() to return after SIGKILL
+		<-exited // wait for the Wait goroutine to finish after SIGKILL
 	}
 	return nil
 }
@@ -244,9 +258,13 @@ func (r *Runner) launch(result BuildResult, isInitial bool, portOverride int) er
 		r.stdinMu.Unlock()
 	}
 
+	exited := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(exited) }()
+
 	r.mu.Lock()
 	r.cmd = cmd
 	r.pid = cmd.Process.Pid
+	r.activeExited = exited
 	r.mu.Unlock()
 
 	if isInitial {
@@ -272,10 +290,14 @@ func (r *Runner) launchPending(result BuildResult, portOverride int) error {
 		return err
 	}
 
+	exited := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(exited) }()
+
 	r.mu.Lock()
 	r.pendingCmd = cmd
 	r.pendingPid = cmd.Process.Pid
 	r.pendingPipe = pipe
+	r.pendingExited = exited
 	r.mu.Unlock()
 
 	r.log.Start(r.name+" (warming up)", cmd.Process.Pid)

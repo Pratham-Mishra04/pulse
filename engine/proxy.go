@@ -24,6 +24,7 @@ import (
 type ReverseProxy struct {
 	addr    string
 	backend atomic.Pointer[httputil.ReverseProxy] // nil until first SwapBackend
+	downMsg atomic.Pointer[string]                // non-nil when backend crashed
 	server  *http.Server
 	log     *log.Logger
 }
@@ -59,6 +60,10 @@ func (p *ReverseProxy) Start() error {
 // SwapBackend atomically points the proxy at http://127.0.0.1:<port>.
 // Any request that arrives after this call is forwarded to the new backend;
 // requests already in-flight to the old backend continue uninterrupted.
+// Also clears any crash message set by MarkCrashed.
+//
+// Callers must serialize SwapBackend and MarkCrashed (e.g. via proxyMu in
+// engine.go) to avoid leaving backend and downMsg in an inconsistent state.
 func (p *ReverseProxy) SwapBackend(port int) {
 	target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
 	rp := httputil.NewSingleHostReverseProxy(target)
@@ -66,7 +71,18 @@ func (p *ReverseProxy) SwapBackend(port int) {
 		p.log.Error(fmt.Sprintf("proxy error: %v", err))
 		http.Error(w, "service unavailable", http.StatusBadGateway)
 	}
+	p.downMsg.Store(nil)
 	p.backend.Store(rp)
+}
+
+// MarkCrashed clears the backend and stores msg so that ServeHTTP returns
+// a 503 with the crash message instead of the generic "service starting...".
+//
+// Callers must serialize MarkCrashed and SwapBackend (e.g. via proxyMu in
+// engine.go) to avoid leaving backend and downMsg in an inconsistent state.
+func (p *ReverseProxy) MarkCrashed(msg string) {
+	p.backend.Store(nil)
+	p.downMsg.Store(&msg)
 }
 
 // Stop gracefully shuts down the HTTP server, waiting for in-flight requests
@@ -85,7 +101,11 @@ func (p *ReverseProxy) Addr() string {
 func (p *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rp := p.backend.Load()
 	if rp == nil {
-		http.Error(w, "service starting...", http.StatusServiceUnavailable)
+		msg := "service starting..."
+		if down := p.downMsg.Load(); down != nil {
+			msg = *down
+		}
+		http.Error(w, msg, http.StatusServiceUnavailable)
 		return
 	}
 	rp.ServeHTTP(w, r)
