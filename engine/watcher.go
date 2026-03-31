@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	ignore "github.com/sabhiram/go-gitignore"
 
+	"github.com/Pratham-Mishra04/pulse/internal/gitignore"
 	"github.com/Pratham-Mishra04/pulse/internal/log"
 )
 
@@ -31,7 +31,7 @@ var hardIgnored = []string{
 type Watcher struct {
 	cfg          ServiceConfig
 	log          *log.Logger
-	gitign       *ignore.GitIgnore // nil if no .gitignore found
+	gitign       *gitignore.GitIgnore // nil if no .gitignore found
 	pollInterval time.Duration     // 0 = use fsnotify, >0 = use polling loop
 	watchRoots   []string          // directories to watch: primary + any go.work extras
 }
@@ -42,9 +42,9 @@ func NewWatcher(cfg ServiceConfig, extraRoots []string, l *log.Logger) (*Watcher
 	// .gitignore is optional — if it doesn't exist, gitign stays nil and
 	// MatchesPath is never called. Only return an error if the file exists
 	// but cannot be parsed.
-	var gi *ignore.GitIgnore
+	var gi *gitignore.GitIgnore
 	if _, err := os.Stat(".gitignore"); err == nil {
-		parsed, err := ignore.CompileIgnoreFile(".gitignore")
+		parsed, err := gitignore.CompileIgnoreFile(".gitignore")
 		if err != nil {
 			return nil, fmt.Errorf("failed to compile .gitignore: %w", err)
 		}
