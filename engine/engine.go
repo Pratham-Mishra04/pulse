@@ -31,6 +31,10 @@ type Engine struct {
 	// previous warmup without waiting for its health check to complete.
 	proxyCancelFn context.CancelFunc
 	proxyMu       sync.Mutex // serializes concurrent proxyRestart calls
+
+	// processDied receives the pid of the active proxy process when it exits
+	// unexpectedly (crash, panic, etc.) while no restart is in progress.
+	processDied chan int
 }
 
 // New creates an Engine for the named service. Returns an error if the
@@ -61,12 +65,13 @@ func New(name string, cfg ServiceConfig, l *log.Logger) (*Engine, error) {
 	}
 
 	e := &Engine{
-		name:    name,
-		cfg:     cfg,
-		log:     l,
-		watcher: watcher,
-		builder: NewBuilder(name, cfg, l),
-		runner:  NewRunner(name, cfg, l),
+		name:        name,
+		cfg:         cfg,
+		log:         l,
+		watcher:     watcher,
+		builder:     NewBuilder(name, cfg, l),
+		runner:      NewRunner(name, cfg, l),
+		processDied: make(chan int, 1),
 	}
 
 	if cfg.Proxy != nil {
@@ -178,6 +183,16 @@ func (e *Engine) Run(ctx context.Context) error {
 			// there is never more than one build running at a time.
 			e.builder.Enqueue()
 
+		case pid := <-e.processDied:
+			// Active proxy process exited unexpectedly (crash, panic, etc.).
+			// Mark the proxy as crashed so clients get a descriptive 503,
+			// and log a prominent error so the user knows what happened.
+			// Invariant: processDied is only sent to from proxyStart/proxyRestart,
+			// both of which require e.proxy != nil, so this call is always safe.
+			msg := fmt.Sprintf("%s process (pid %d) crashed — save a file to restart", e.name, pid)
+			e.proxy.MarkCrashed(msg)
+			e.log.Error(msg)
+
 		case result, ok := <-e.builder.Results():
 			if !ok {
 				// Builder goroutine exited unexpectedly — shut down cleanly.
@@ -241,6 +256,7 @@ func (e *Engine) proxyStart(ctx context.Context, result BuildResult) error {
 
 	e.proxy.SwapBackend(port)
 	e.log.Info(fmt.Sprintf("%s is healthy — proxy now forwarding %s → :%d", e.name, e.proxy.Addr(), port))
+	e.watchActiveProcess()
 	return nil
 }
 
@@ -273,7 +289,7 @@ func (e *Engine) proxyRestart(ctx context.Context, result BuildResult) {
 		return
 	}
 
-	oldCmd, oldPid := e.runner.CurrentCmdPid()
+	oldCmd, oldPid, oldExited := e.runner.CaptureActive()
 
 	if err := e.runner.LaunchNew(result, port); err != nil {
 		cancel()
@@ -318,16 +334,41 @@ func (e *Engine) proxyRestart(ctx context.Context, result BuildResult) {
 		e.proxy.SwapBackend(port)
 		e.runner.PromotePending()
 		e.log.Info(fmt.Sprintf("%s is healthy — proxy now forwarding %s → :%d", e.name, e.proxy.Addr(), port))
+		e.watchActiveProcess()
 		e.proxyMu.Unlock()
 
 		// Stop the old process in the background so we don't block the swap.
 		go func() {
 			e.log.Info(fmt.Sprintf("shutting down old %s process (pid %d)", e.name, oldPid))
-			if err := e.runner.StopProcess(oldCmd, oldPid); err != nil {
+			if err := e.runner.StopProcess(oldCmd, oldPid, oldExited); err != nil {
 				e.log.Error("failed to stop old process: " + err.Error())
 			}
 		}()
 
 		cancel()
+	}()
+}
+
+// watchActiveProcess starts a goroutine that waits for the current active
+// process to exit. If it exits while still the active process (i.e. it was
+// not intentionally replaced), processDied receives its pid so the event loop
+// can clear the proxy backend and log a clear error.
+func (e *Engine) watchActiveProcess() {
+	exited := e.runner.ActiveExited()
+	pid := e.runner.Pid()
+	if exited == nil || pid == 0 {
+		return
+	}
+	go func() {
+		<-exited
+		// Only signal if this process is still the active one — a swap would
+		// have already replaced the pid before stopping the old process.
+		if e.runner.Pid() != pid {
+			return
+		}
+		select {
+		case e.processDied <- pid:
+		default:
+		}
 	}()
 }
