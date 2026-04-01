@@ -184,9 +184,12 @@ func (r *Runner) Stop() error {
 
 // stopProcess is the shared implementation for gracefully stopping any
 // pid: SIGTERM → KillTimeout → SIGKILL.
-// exited is the channel that the process's dedicated Wait goroutine closes
-// when the process exits — it must not be nil.
-func (r *Runner) stopProcess(_ *exec.Cmd, pid int, exited <-chan struct{}) error {
+// Returns nil immediately if cmd is nil or pid is 0 (empty snapshot).
+// exited must not be nil when a real process is present.
+func (r *Runner) stopProcess(cmd *exec.Cmd, pid int, exited <-chan struct{}) error {
+	if cmd == nil || pid == 0 {
+		return nil
+	}
 	if exited == nil {
 		return fmt.Errorf("stopProcess: exited channel must not be nil")
 	}
