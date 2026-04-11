@@ -171,11 +171,13 @@ func TestShouldReload_GeneratedFiles(t *testing.T) {
 		path string
 		want bool
 	}{
-		{"./internal/wire_gen.go", false}, // _gen.go suffix
-		{"./proto/user.pb.go", false},     // .pb.go suffix
-		{"./internal/handler.go", true},   // normal .go file
-		{"./cmd/api/main.go", true},       // normal .go file
-		{"./gen/generated_gen.go", false}, // both gen + _gen.go
+		{"./internal/wire_gen.go", false},    // _gen.go suffix
+		{"./proto/user.pb.go", false},        // .pb.go suffix
+		{"./internal/handler.go", true},      // normal .go file
+		{"./cmd/api/main.go", true},          // normal .go file
+		{"./gen/generated_gen.go", false},    // both gen + _gen.go
+		{"./internal/handler_test.go", false}, // test file — never compiled by go build
+		{"./cmd/api/main_test.go", false},    // test file at cmd level
 	}
 	for _, tc := range cases {
 		got := w.shouldReload(tc.path)

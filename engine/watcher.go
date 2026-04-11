@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -32,8 +33,13 @@ type Watcher struct {
 	cfg          ServiceConfig
 	log          *log.Logger
 	gitign       *gitignore.GitIgnore // nil if no .gitignore found
-	pollInterval time.Duration     // 0 = use fsnotify, >0 = use polling loop
-	watchRoots   []string          // directories to watch: primary + any go.work extras
+	pollInterval time.Duration        // 0 = use fsnotify, >0 = use polling loop
+	watchRoots   []string             // directories to watch: primary + any go.work extras
+
+	// contentCache maps absolute file path → last-seen content.
+	// Used by isCommentOnlyDiff to detect when a change is comment-only
+	// and the rebuild can be safely skipped.
+	contentCache sync.Map
 }
 
 // NewWatcher creates a Watcher for cfg. extraRoots contains any additional
@@ -163,6 +169,10 @@ func (w *Watcher) handleFSEvent(fsw *fsnotify.Watcher, ev fsnotify.Event, events
 		w.log.Verbose("ignored: " + ev.Name)
 		return
 	}
+	if w.isCommentOnlyDiff(ev.Name) {
+		w.log.Skip(ev.Name, "comment-only change")
+		return
+	}
 	// Non-blocking send: if the buffer is full the event is dropped.
 	// This is safe because the debounce window in Builder will coalesce
 	// the remaining events into a single build anyway.
@@ -208,6 +218,10 @@ func (w *Watcher) startPolling(ctx context.Context) (<-chan string, error) {
 					prev, seen := snapshot[path]
 					// Emit if file is new or its mtime advanced.
 					if !seen || mtime.After(prev) {
+						if w.isCommentOnlyDiff(path) {
+							w.log.Skip(path, "comment-only change")
+							continue
+						}
 						select {
 						case events <- path:
 						default:
@@ -261,6 +275,72 @@ func (w *Watcher) buildSnapshot() (map[string]time.Time, error) {
 	return snapshot, nil
 }
 
+// isCommentOnlyDiff reads the file at path, compares a hash of its
+// comment-stripped content against the cached hash from the previous version,
+// updates the cache, and returns true when the change is comment-only.
+//
+// The cache stores an FNV-64a hash of the stripped content (8 bytes per file)
+// rather than the raw bytes, so memory usage is O(number of watched files)
+// regardless of file size.
+//
+// Returns false (do not skip) when:
+//   - The file extension is not recognized (safe fallback).
+//   - The file cannot be read.
+//   - The file exceeds maxCommentCheckBytes (logged at info level).
+//   - No hash is cached yet (first time the file is seen).
+//   - Non-comment code differs between the two versions.
+func (w *Watcher) isCommentOnlyDiff(path string) bool {
+	ext := filepath.Ext(path)
+	style, ok := commentStyleFor(ext)
+	if !ok {
+		return false
+	}
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		absPath = path
+	}
+
+	// Guard: stat first so large files are never read into memory at all.
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return false
+	}
+	if info.Size() > maxCommentCheckBytes {
+		w.log.Info(fmt.Sprintf(
+			"comment-check skipped for %s (%d KB exceeds limit) — rebuild triggered",
+			filepath.Base(path), info.Size()/1024,
+		))
+		return false
+	}
+
+	newContent, err := os.ReadFile(absPath)
+	if err != nil {
+		return false
+	}
+
+	newHash := strippedHash(newContent, style)
+
+	var (
+		oldHash   uint64
+		hasCached bool
+	)
+	if cached, ok := w.contentCache.Load(absPath); ok {
+		oldHash = cached.(uint64)
+		hasCached = true
+	}
+
+	// Always update so the next diff has the latest baseline.
+	w.contentCache.Store(absPath, newHash)
+
+	if !hasCached {
+		// First sight of this file — no baseline to compare against.
+		return false
+	}
+
+	return oldHash == newHash
+}
+
 // shouldReload returns true if a change to path should trigger a rebuild.
 // Filters are applied in order from cheapest to most specific.
 func (w *Watcher) shouldReload(path string) bool {
@@ -283,10 +363,11 @@ func (w *Watcher) shouldReload(path string) bool {
 		return false
 	}
 
-	// 4. Generated file conventions — these change frequently but should
-	// never be the source of a rebuild trigger.
+	// 4. Generated and test-only file conventions — these are never compiled
+	// into the production binary so there is no point triggering a rebuild
+	// when they change.
 	base := filepath.Base(path)
-	if matchesSuffix(base, "_gen.go", ".pb.go") {
+	if matchesSuffix(base, "_gen.go", ".pb.go", "_test.go") {
 		return false
 	}
 
