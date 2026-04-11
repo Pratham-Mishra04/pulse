@@ -233,11 +233,10 @@ func (l *Logger) Banner(version, goVersion, configPath string, services []Servic
 		return
 	}
 
-	styleArt     := lipgloss.NewStyle().Foreground(lipgloss.Color("99"))
-	styleTag     := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	styleArt := lipgloss.NewStyle().Foreground(lipgloss.Color("99"))
+	styleTag := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	styleSvcName := lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true)
-	stylePath    := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	styleWatch   := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	stylePath := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 
 	// ANSI-shadow figlet art for "PULSE".
 	// S column taken from BIFROST brand art.
@@ -266,11 +265,9 @@ func (l *Logger) Banner(version, goVersion, configPath string, services []Servic
 		if path == "" {
 			path = "."
 		}
-		exts := strings.Join(svc.Watch, "  ")
-		fmt.Printf("  %s  %s  %s\n",
-			styleSvcName.Render(svc.Name),
+		fmt.Printf("running %s/%s \n",
 			stylePath.Render(path),
-			styleWatch.Render(exts),
+			styleSvcName.Render(svc.Name),
 		)
 	}
 	fmt.Println()
