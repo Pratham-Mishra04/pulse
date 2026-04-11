@@ -237,7 +237,6 @@ func (l *Logger) Banner(version, goVersion, configPath string, services []Servic
 	styleTag     := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	styleSvcName := lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true)
 	stylePath    := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	styleDot     := lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
 	styleWatch   := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 
 	// ANSI-shadow figlet art for "PULSE".
@@ -268,10 +267,9 @@ func (l *Logger) Banner(version, goVersion, configPath string, services []Servic
 			path = "."
 		}
 		exts := strings.Join(svc.Watch, "  ")
-		fmt.Printf("  %s  %s  %s  %s\n",
+		fmt.Printf("  %s  %s  %s\n",
 			styleSvcName.Render(svc.Name),
 			stylePath.Render(path),
-			styleDot.Render("·"),
 			styleWatch.Render(exts),
 		)
 	}
