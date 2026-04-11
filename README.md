@@ -17,6 +17,7 @@ Fix your code. Your server stays up.
 - Automatically watches `go.work` dependencies across monorepos
 - Works with **any language or toolchain** — not just Go
 - Optional **zero-downtime restarts** for HTTP services with slow startup times
+- **Skips rebuilds for comment-only changes** — editing a comment won't typically trigger a recompile (exceptions: first save after startup, and inline trailing comments on code lines)
 
 ---
 
@@ -278,6 +279,7 @@ These are hardcoded and cannot be overridden:
 | `testdata/`     | Go test fixture convention |
 | `*_gen.go`      | Generated files            |
 | `*.pb.go`       | Protobuf generated files   |
+| `*_test.go`     | Test-only files (never compiled into the production binary) |
 
 ---
 
@@ -459,6 +461,48 @@ services:
     run: ./tmp/api
     no_workspace: true
 ```
+
+---
+
+## Comment-Only Change Detection
+
+Pulse reads the content of changed files and skips the rebuild when the only difference is comment edits — added, removed, or reworded comments that don't touch actual code.
+
+```text
+// old comment  →  // new comment   ← rebuild skipped
+x := 5          →  x := 5          ← no code change
+```
+
+This works across a wide range of languages automatically:
+
+| Language family | Extensions |
+| --- | --- |
+| Go, Rust, Java, C/C++, JS/TS, Swift, Kotlin, C#, PHP, Scala, Dart | `//` line comments, `/* */` block comments |
+| Python, Ruby, Shell, YAML, TOML | `#` line comments |
+| CSS / SCSS / Less | `/* */` block comments |
+| HTML, XML, Svelte, Vue | `<!-- -->` block comments |
+| SQL | `--` line comments, `/* */` block comments |
+
+**How it works:**
+
+1. When a watched file changes, Pulse strips all comment lines and blank lines from the new content and hashes the result.
+2. If the hash matches the stored hash from the previous version, the change is comment-only — the rebuild is skipped and a `[skip]` line is logged.
+3. The hash is stored so every subsequent change has an accurate baseline.
+
+> **First change after startup always rebuilds.** Pulse does not pre-read files on startup, so no baseline exists until a file is saved for the first time. Comment detection kicks in from the second change onwards.
+
+**What counts as a comment line:**
+
+- Lines whose trimmed content starts with the language's line-comment prefix (`//`, `#`, `--`)
+- Lines that fall entirely within a block comment span (`/* ... */`, `<!-- ... -->`)
+
+**What is intentionally not stripped:** inline comments that follow real code on the same line (e.g. `x = 5 // note`). Stripping those would require a full parser and risk false positives from comment markers inside string literals. A change like `x = 5 // old` → `x = 5 // new` is treated conservatively and triggers a rebuild.
+
+**Files that skip comment detection entirely:**
+
+- `_test.go` files — hard-excluded from watching altogether (see [Always-Ignored](#always-ignored)), so they never reach this check
+- Files larger than **1 MB** — reading and hashing very large files on every save isn't worth it; Pulse logs a `[pulse]` info message and triggers a rebuild as usual
+- Unrecognized extensions — any file type not in the language table above always triggers a rebuild
 
 ---
 
